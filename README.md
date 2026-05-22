@@ -32,6 +32,7 @@ dotnet run -- play output.lvfb --renderer gpu
 dotnet run -- play-gpu output.lvfs
 dotnet run -- info output.lvfs
 dotnet run -- gpu-info
+dotnet run -- test-strokes
 ```
 
 ## GitHub Sync

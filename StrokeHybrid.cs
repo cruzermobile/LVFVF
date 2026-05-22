@@ -62,6 +62,111 @@ partial class Program
             extension.Equals(".lvfsz", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static int StrokeSelfTestCommand()
+    {
+        const int width = 96;
+        const int height = 64;
+        int surfaceCellSize = StrokeSurfaceCellSize(width, height, 82, 35);
+        StrokeHeader header = new(width, height, 30, 82, 60, 35, 35, 55, 2, surfaceCellSize, DivRoundUp(width, surfaceCellSize), DivRoundUp(height, surfaceCellSize));
+        StrokeEncodeOptions options = new(82, 70, 35, 35, 55, 2, 1, CompressionLevel.Fastest, false, 0);
+        StrokeEncodeState state = new(header);
+
+        byte[] first = BuildSyntheticStrokeTestFrame(width, height, 0);
+        byte[] second = BuildSyntheticStrokeTestFrame(width, height, 4);
+        StrokeFrame frame0 = TraceStrokeFrame(0, first, header, options, state, null);
+        StrokeFrame frame1 = TraceStrokeFrame(1, second, header, options, state, null);
+
+        RequireStrokeTest(frame0.IsKeyframe, "first frame should be a keyframe");
+        RequireStrokeTest(frame0.SurfaceChanges.Count == header.SurfaceColumns * header.SurfaceRows, "keyframe should write every surface cell");
+        RequireStrokeTest(frame0.Strokes.Count > 0, "synthetic diagonal should produce strokes");
+        RequireStrokeTest(frame0.Strokes.Any(stroke => stroke.Points.Count >= 2), "strokes should contain polyline points");
+        RequireStrokeTest(frame1.Strokes.Any(stroke => frame0.Strokes.Any(previous => previous.Id == stroke.Id)), "second frame should reuse at least one stroke ID");
+
+        string tempPath = Path.Combine(Path.GetTempPath(), $"lvfvf-stroke-selftest-{Guid.NewGuid():N}.lvfs");
+        try
+        {
+            using (StrokeFrameWriter writer = new(tempPath, CompressionLevel.Fastest))
+            {
+                writer.WriteHeader(header);
+                writer.WriteFrame(frame0);
+                writer.WriteFrame(frame1);
+            }
+
+            using StrokeFrameReader reader = new(tempPath);
+            DecodedStrokeFrame? decoded0 = reader.ReadNextFrame();
+            DecodedStrokeFrame? decoded1 = reader.ReadNextFrame();
+            RequireStrokeTest(decoded0 is not null && decoded1 is not null, "roundtrip should decode two frames");
+            RequireStrokeTest(reader.ReadNextFrame() is null, "roundtrip should stop cleanly at EOF");
+            RequireStrokeTest(decoded0!.SurfaceColors.Length == header.SurfaceColumns * header.SurfaceRows, "decoded surfaces should cover the frame");
+            RequireStrokeTest(decoded0.Strokes.Count == frame0.Strokes.Count, "decoded stroke count should match");
+            RequireStrokeTest(decoded1!.Residuals.Count == frame1.Residuals.Count, "decoded residual count should match");
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        Console.WriteLine("Stroke self-test passed.");
+        Console.WriteLine($"  Frame 0: {frame0.Strokes.Count} strokes, {frame0.Residuals.Count} residual patches");
+        Console.WriteLine($"  Frame 1: {frame1.Strokes.Count} strokes, {frame1.Residuals.Count} residual patches");
+        return 0;
+    }
+
+    private static byte[] BuildSyntheticStrokeTestFrame(int width, int height, int shift)
+    {
+        byte[] frame = new byte[checked(width * height * 3)];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int offset = (y * width + x) * 3;
+                frame[offset] = (byte)(32 + x * 40 / width);
+                frame[offset + 1] = (byte)(38 + y * 35 / height);
+                frame[offset + 2] = 48;
+            }
+        }
+
+        for (int y = 14; y < 46; y++)
+        {
+            for (int x = 24 + shift; x < 68 + shift && x < width; x++)
+            {
+                int offset = (y * width + x) * 3;
+                frame[offset] = 50;
+                frame[offset + 1] = 86;
+                frame[offset + 2] = 190;
+            }
+        }
+
+        for (int i = 0; i < Math.Min(width, height); i++)
+        {
+            int x = Math.Clamp(i + shift, 0, width - 1);
+            int y = i;
+            int offset = (y * width + x) * 3;
+            frame[offset] = 235;
+            frame[offset + 1] = 235;
+            frame[offset + 2] = 235;
+        }
+
+        return frame;
+    }
+
+    private static void RequireStrokeTest(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidOperationException($"Stroke self-test failed: {message}");
+        }
+    }
+
     private static void ProcessVideoStrokes(string videoPath, string outputPath, StrokeEncodeOptions options, AccelerationOptions acceleration)
     {
         if (!File.Exists(videoPath))

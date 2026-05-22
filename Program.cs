@@ -74,6 +74,9 @@ partial class Program
             case "gpu-info":
             case "accel-info":
                 return GpuInfoCommand();
+            case "test-strokes":
+            case "stroke-test":
+                return StrokeSelfTestCommand();
             case "help":
             case "-h":
             case "--help":
@@ -263,6 +266,7 @@ partial class Program
         Console.WriteLine("  LVFVF play-gpu <file.lvfb>");
         Console.WriteLine("  LVFVF info <file.lvf|file.lvfz|file.lvfb|file.lvfs>");
         Console.WriteLine("  LVFVF gpu-info");
+        Console.WriteLine("  LVFVF test-strokes");
         Console.WriteLine();
         Console.WriteLine("Experimental legacy edge mode:");
         Console.WriteLine("  LVFVF convert-edges <input-video> [output.lvfz] [--sensitivity 80] [--simplify 1.75] [--accel auto|cpu|cuda|opencl|hybrid|ffmpeg] [--compression optimal|fast|smallest]");
