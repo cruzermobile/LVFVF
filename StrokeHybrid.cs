@@ -27,12 +27,19 @@ partial class Program
         int quality = TakeIntOption(args, DefaultQuality, 1, 100, "--quality", "-q");
         int strokeDensity = TakeIntOption(args, 78, 0, 100, "--stroke-density", "--strokes");
         int surfaceDetail = TakeIntOption(args, 65, 0, 100, "--surface-detail", "--surfaces");
-        int residual = TakeIntOption(args, 12, 0, 100, "--residual", "--residuals");
+        int residual = TakeIntOption(args, 6, 0, 100, "--residual", "--residuals");
         int glow = TakeIntOption(args, 38, 0, 100, "--glow");
-        int surfaceOpacity = TakeIntOption(args, 28, 0, 100, "--surface-opacity", "--surface-alpha");
+        int surfaceOpacity = TakeIntOption(args, 10, 0, 100, "--surface-opacity", "--surface-alpha");
         int keyframeInterval = TakeIntOption(args, 30, 1, 600, "--keyframe", "--keyframes", "--keyframe-interval");
         int pipelineDepth = TakeIntOption(args, 4, 1, Math.Max(1, Environment.ProcessorCount / 2), "--pipeline", "--parallel-frames");
         int maxFrames = TakeIntOption(args, 0, 0, int.MaxValue, "--max-frames", "--frames");
+        bool vectorOnly = TakeFlag(args, "--vector-only", "--no-surface", "--strokes-only");
+        if (vectorOnly)
+        {
+            surfaceOpacity = 0;
+            residual = 0;
+        }
+
         using AccelerationOptions acceleration = CreateAccelerationOptions(TakeAccelerationOption(args));
 
         if (args.Count is < 1 or > 2)
