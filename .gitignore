@@ -1,0 +1,25 @@
+bin/
+obj/
+.vs/
+.vscode/
+
+*.user
+*.suo
+*.log
+*.tmp
+
+# Source videos and generated LVFVF outputs are large. Share them separately
+# or add selected samples intentionally later.
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.lvfb
+*.lvfbz
+*.lvfz
+*.lvf
+
+# Local scratch files from experiments.
+_*
+test-command.txt
