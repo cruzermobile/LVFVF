@@ -29,6 +29,7 @@ partial class Program
         int glow = TakeIntOption(args, 55, 0, 100, "--glow");
         int keyframeInterval = TakeIntOption(args, 30, 1, 600, "--keyframe", "--keyframes", "--keyframe-interval");
         int pipelineDepth = TakeIntOption(args, 4, 1, Math.Max(1, Environment.ProcessorCount / 2), "--pipeline", "--parallel-frames");
+        int maxFrames = TakeIntOption(args, 0, 0, int.MaxValue, "--max-frames", "--frames");
         using AccelerationOptions acceleration = CreateAccelerationOptions(TakeAccelerationOption(args));
 
         if (args.Count is < 1 or > 2)
@@ -48,7 +49,8 @@ partial class Program
             keyframeInterval,
             pipelineDepth,
             compressionLevel,
-            profile);
+            profile,
+            maxFrames);
         ProcessVideoStrokes(input, output, options, acceleration);
         return 0;
     }
@@ -80,6 +82,11 @@ partial class Program
         Console.WriteLine($"Surface grid: {surfaceColumns}x{surfaceRows} cells ({surfaceCellSize}px target)");
         Console.WriteLine($"Keyframes: every {options.KeyframeInterval} frame(s)");
         Console.WriteLine($"Pipeline: temporal tracking path, {options.PipelineDepth} requested (decode/analysis kept ordered for stable IDs)");
+        if (options.MaxFrames > 0)
+        {
+            Console.WriteLine($"Max frames: {options.MaxFrames}");
+        }
+
         Console.WriteLine($"Acceleration: {DescribeAcceleration(acceleration)}");
         Console.WriteLine($"Compression: {DescribeCompression(options.CompressionLevel)}");
         Console.WriteLine("OpenCV: not used by convert-strokes hot path");
@@ -133,6 +140,11 @@ partial class Program
             if (frameCount % 10 == 0)
             {
                 Console.WriteLine($"Encoded {frameCount} frames | {totalStrokes} strokes | {totalStrokePoints} stroke points | {totalResiduals} residual patches");
+            }
+
+            if (options.MaxFrames > 0 && frameCount >= options.MaxFrames)
+            {
+                break;
             }
         }
 
@@ -1333,6 +1345,70 @@ partial class Program
         return Math.Min(forward, reverse) * 0.5;
     }
 
+    private static List<Point> SimplifyStrokePath(List<Point> points, double epsilon)
+    {
+        if (points.Count <= 2 || epsilon <= 0)
+        {
+            return points.ToList();
+        }
+
+        bool[] keep = new bool[points.Count];
+        keep[0] = true;
+        keep[^1] = true;
+        SimplifyStrokePathRecursive(points, 0, points.Count - 1, epsilon * epsilon, keep);
+
+        List<Point> simplified = new();
+        for (int i = 0; i < points.Count; i++)
+        {
+            if (keep[i])
+            {
+                simplified.Add(points[i]);
+            }
+        }
+
+        return simplified.Count >= 2 ? simplified : points.Take(2).ToList();
+    }
+
+    private static void SimplifyStrokePathRecursive(List<Point> points, int start, int end, double epsilonSquared, bool[] keep)
+    {
+        if (end <= start + 1)
+        {
+            return;
+        }
+
+        double bestDistance = 0;
+        int bestIndex = -1;
+        Point a = points[start];
+        Point b = points[end];
+        for (int i = start + 1; i < end; i++)
+        {
+            double distance = DistanceToSegmentSquared(points[i], a, b);
+            if (distance > bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+
+        if (bestIndex >= 0 && bestDistance > epsilonSquared)
+        {
+            keep[bestIndex] = true;
+            SimplifyStrokePathRecursive(points, start, bestIndex, epsilonSquared, keep);
+            SimplifyStrokePathRecursive(points, bestIndex, end, epsilonSquared, keep);
+        }
+    }
+
+    private static double StrokePathLength(IReadOnlyList<Point> points)
+    {
+        double length = 0;
+        for (int i = 1; i < points.Count; i++)
+        {
+            length += Distance(points[i - 1], points[i]);
+        }
+
+        return length;
+    }
+
     private static Color BoostStrokeGlowColor(Color color, byte intensity)
     {
         double boost = 1.08 + intensity / 255.0 * 0.28;
@@ -1868,7 +1944,7 @@ partial class Program
         FrameTotal
     }
 
-    private sealed record StrokeEncodeOptions(int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int KeyframeInterval, int PipelineDepth, CompressionLevel CompressionLevel, bool Profile);
+    private sealed record StrokeEncodeOptions(int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int KeyframeInterval, int PipelineDepth, CompressionLevel CompressionLevel, bool Profile, int MaxFrames);
     private sealed record StrokeHeader(int Width, int Height, double Fps, int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int KeyframeInterval, int SurfaceCellSize, int SurfaceColumns, int SurfaceRows);
     private sealed record StrokeFrame(int FrameNumber, bool IsKeyframe, List<StrokeSurfaceChange> SurfaceChanges, List<StrokePrimitive> Strokes, List<StrokeResidualPatch> Residuals);
     private sealed record DecodedStrokeFrame(int FrameNumber, bool IsKeyframe, Color[] SurfaceColors, List<StrokePrimitive> Strokes, List<StrokeResidualPatch> Residuals);
