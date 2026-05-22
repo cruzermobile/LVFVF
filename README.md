@@ -36,8 +36,7 @@ This folder includes small PowerShell helpers for source-only GitHub syncing. Ge
 After creating an empty GitHub repository:
 
 ```powershell
-git remote add origin <repo-url>
-git push -u origin main
+.\scripts\connect-github.ps1 -RepoUrl <repo-url>
 ```
 
 To push a snapshot manually:
