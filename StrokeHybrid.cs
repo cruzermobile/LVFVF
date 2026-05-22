@@ -23,10 +23,10 @@ partial class Program
         bool profile = TakeFlag(args, "--profile");
         CompressionLevel compressionLevel = TakeCompressionOption(args);
         int quality = TakeIntOption(args, DefaultQuality, 1, 100, "--quality", "-q");
-        int strokeDensity = TakeIntOption(args, 60, 0, 100, "--stroke-density", "--strokes");
-        int surfaceDetail = TakeIntOption(args, 35, 0, 100, "--surface-detail", "--surfaces");
-        int residual = TakeIntOption(args, 20, 0, 100, "--residual", "--residuals");
-        int glow = TakeIntOption(args, 55, 0, 100, "--glow");
+        int strokeDensity = TakeIntOption(args, 78, 0, 100, "--stroke-density", "--strokes");
+        int surfaceDetail = TakeIntOption(args, 65, 0, 100, "--surface-detail", "--surfaces");
+        int residual = TakeIntOption(args, 12, 0, 100, "--residual", "--residuals");
+        int glow = TakeIntOption(args, 38, 0, 100, "--glow");
         int keyframeInterval = TakeIntOption(args, 30, 1, 600, "--keyframe", "--keyframes", "--keyframe-interval");
         int pipelineDepth = TakeIntOption(args, 4, 1, Math.Max(1, Environment.ProcessorCount / 2), "--pipeline", "--parallel-frames");
         int maxFrames = TakeIntOption(args, 0, 0, int.MaxValue, "--max-frames", "--frames");
@@ -576,7 +576,7 @@ partial class Program
             return 255;
         }
 
-        double keepPercent = 0.008 + strokeDensity * 0.00048 + quality * 0.00014;
+        double keepPercent = 0.014 + strokeDensity * 0.00072 + quality * 0.00017;
         int keep = Math.Clamp((int)Math.Round(nonZero * keepPercent), Math.Max(80, nonZero / 300), Math.Max(1, nonZero / 6));
         int accumulated = 0;
         for (int value = 255; value >= 1; value--)
@@ -1249,7 +1249,7 @@ partial class Program
     private static Color SurfaceDisplayColor(Color center, Color topLeft, Color topRight, Color bottomLeft, Color bottomRight, double tx, double ty)
     {
         Color smooth = BilinearColor(topLeft, topRight, bottomLeft, bottomRight, tx, ty);
-        return BlendColor(center, smooth, 0.28);
+        return BlendColor(center, smooth, 0.12);
     }
 
     private static Color SurfaceDisplayColorAtPixel(Color[] surfaceColors, Color[] corners, StrokeHeader header, int x, int y)
@@ -1663,9 +1663,9 @@ partial class Program
 
     private static int StrokeSurfaceCellSize(int width, int height, int quality, int surfaceDetail)
     {
-        double longEdgeScale = Math.Clamp(Math.Max(width, height) / 1080.0, 0.75, 2.0);
-        double size = (36 - surfaceDetail * 0.22 - quality * 0.08) * longEdgeScale;
-        return Math.Clamp((int)Math.Round(size), 8, 48);
+        double pixelScale = Math.Clamp(Math.Sqrt(width * height / (1920.0 * 1080.0)), 0.75, 1.35);
+        double size = (25 - surfaceDetail * 0.15 - quality * 0.055) * pixelScale;
+        return Math.Clamp((int)Math.Round(size), 7, 32);
     }
 
     private static int SurfaceDeltaThreshold(int quality, int surfaceDetail)
@@ -1675,36 +1675,36 @@ partial class Program
 
     private static int StrokeMinComponentPixels(int width, int height, int quality, int strokeDensity)
     {
-        double scale = Math.Sqrt(width * height / (1280.0 * 720.0));
-        return Math.Clamp((int)Math.Round((18 - quality * 0.08 - strokeDensity * 0.05) * scale), 4, 22);
+        double scale = Math.Clamp(Math.Sqrt(width * height / (1920.0 * 1080.0)), 0.75, 1.4);
+        return Math.Clamp((int)Math.Round((12 - quality * 0.045 - strokeDensity * 0.035) * scale), 3, 14);
     }
 
     private static double StrokeMinLength(int width, int height, int quality, int strokeDensity)
     {
         double diagonal = Math.Sqrt(width * width + height * height);
-        return Math.Clamp(diagonal * (0.008 - quality * 0.000025 - strokeDensity * 0.000018), 5, 28);
+        return Math.Clamp(diagonal * (0.006 - quality * 0.000018 - strokeDensity * 0.000014), 4, 20);
     }
 
     private static double StrokeSimplifyForQuality(int quality, int strokeDensity)
     {
-        return Math.Clamp(3.9 - quality * 0.017 - strokeDensity * 0.005, 0.9, 3.8);
+        return Math.Clamp(2.7 - quality * 0.012 - strokeDensity * 0.004, 0.7, 2.8);
     }
 
     private static int MaxStrokesForFrame(int width, int height, int strokeDensity)
     {
         double megapixels = width * height / 1_000_000.0;
-        return Math.Clamp((int)Math.Round(90 + strokeDensity * 5.5 + megapixels * 70), 70, 900);
+        return Math.Clamp((int)Math.Round(150 + strokeDensity * 9.0 + megapixels * 110), 120, 1500);
     }
 
     private static int MaxStrokePointsForFrame(int width, int height, int strokeDensity)
     {
         double megapixels = width * height / 1_000_000.0;
-        return Math.Clamp((int)Math.Round(2600 + strokeDensity * 55 + megapixels * 850), 2800, 14000);
+        return Math.Clamp((int)Math.Round(5200 + strokeDensity * 105 + megapixels * 1450), 5000, 26000);
     }
 
     private static int MaxStrokePointsPerStroke(int quality, int strokeDensity)
     {
-        return Math.Clamp(54 + quality + strokeDensity / 3, 72, 170);
+        return Math.Clamp(70 + quality + strokeDensity / 2, 90, 230);
     }
 
     private static int ResidualErrorThreshold(int quality, int residualStrength)

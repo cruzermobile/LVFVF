@@ -24,7 +24,7 @@ dotnet run -- convert input.mp4 output.lvfb --quality 88 --accel auto --pipeline
 dotnet run -- convert input.mp4 output.lvfb --tracer merged-fast --corrections 0 --profile
 dotnet run -- convert input.mp4 output.lvfb --tracer merged --profile
 dotnet run -- convert input.mp4 output.lvfb --tracer custom --profile
-dotnet run -- convert-strokes input.mp4 output.lvfs --quality 82 --stroke-density 60 --surface-detail 35 --residual 20 --glow 55 --keyframe 30 --pipeline 4 --profile
+dotnet run -- convert-strokes input.mp4 output.lvfs --quality 82 --stroke-density 78 --surface-detail 65 --residual 12 --glow 38 --keyframe 30 --pipeline 4 --profile
 dotnet run -- convert-strokes input.mp4 output.lvfs --max-frames 30 --profile
 dotnet run -- play output.lvfb
 dotnet run -- play output.lvfs
