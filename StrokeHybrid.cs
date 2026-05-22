@@ -2406,6 +2406,78 @@ partial class Program
         }
     }
 
+    private sealed class StrokeGpuAnalyzer : IDisposable
+    {
+        private readonly Context _context;
+        private readonly Accelerator _accelerator;
+        private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>, ArrayView<short>, int, int> _analysisKernel;
+
+        private StrokeGpuAnalyzer(Context context, Accelerator accelerator)
+        {
+            _context = context;
+            _accelerator = accelerator;
+            DeviceName = accelerator.Name;
+            _analysisKernel = accelerator.LoadAutoGroupedStreamKernel<
+                Index1D,
+                ArrayView<byte>,
+                ArrayView<byte>,
+                ArrayView<byte>,
+                ArrayView<short>,
+                ArrayView<short>,
+                int,
+                int>(AnalyzeStrokeFrameCudaKernel);
+        }
+
+        public string DeviceName { get; }
+
+        public static StrokeGpuAnalyzer? TryCreate(AccelerationOptions acceleration)
+        {
+            if (acceleration.Mode is AccelerationMode.Cpu or AccelerationMode.OpenCl or AccelerationMode.FfmpegHardwareDecode)
+            {
+                return null;
+            }
+
+            try
+            {
+                Context context = Context.Create(builder => builder.Default());
+                Device? device = context.Devices.FirstOrDefault(device => device.AcceleratorType == AcceleratorType.Cuda);
+                if (device is null)
+                {
+                    context.Dispose();
+                    return null;
+                }
+
+                Accelerator accelerator = device.CreateAccelerator(context);
+                return new StrokeGpuAnalyzer(context, accelerator);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public StrokeAnalysis Analyze(byte[] sourceBgr, int width, int height)
+        {
+            int pixelCount = checked(width * height);
+            using MemoryBuffer1D<byte, Stride1D.Dense> sourceBuffer = _accelerator.Allocate1D<byte>(sourceBgr.Length);
+            using MemoryBuffer1D<byte, Stride1D.Dense> luminanceBuffer = _accelerator.Allocate1D<byte>(pixelCount);
+            using MemoryBuffer1D<byte, Stride1D.Dense> magnitudeBuffer = _accelerator.Allocate1D<byte>(pixelCount);
+            using MemoryBuffer1D<short, Stride1D.Dense> gxBuffer = _accelerator.Allocate1D<short>(pixelCount);
+            using MemoryBuffer1D<short, Stride1D.Dense> gyBuffer = _accelerator.Allocate1D<short>(pixelCount);
+
+            sourceBuffer.CopyFromCPU(sourceBgr);
+            _analysisKernel(pixelCount, sourceBuffer.View, luminanceBuffer.View, magnitudeBuffer.View, gxBuffer.View, gyBuffer.View, width, height);
+            _accelerator.Synchronize();
+            return new StrokeAnalysis(new GradientField(magnitudeBuffer.GetAsArray1D(), gxBuffer.GetAsArray1D(), gyBuffer.GetAsArray1D()));
+        }
+
+        public void Dispose()
+        {
+            _accelerator.Dispose();
+            _context.Dispose();
+        }
+    }
+
     private static void WriteStrokeColor(BinaryWriter writer, Color color)
     {
         writer.Write(color.R);
@@ -2419,6 +2491,63 @@ partial class Program
         byte g = reader.ReadByte();
         byte b = reader.ReadByte();
         return Color.FromArgb(r, g, b);
+    }
+
+    private static void AnalyzeStrokeFrameCudaKernel(
+        Index1D index,
+        ArrayView<byte> sourceBgr,
+        ArrayView<byte> luminance,
+        ArrayView<byte> magnitude,
+        ArrayView<short> gxValues,
+        ArrayView<short> gyValues,
+        int width,
+        int height)
+    {
+        int i = index;
+        int pixelCount = width * height;
+        if (i >= pixelCount)
+        {
+            return;
+        }
+
+        int offset = i * 3;
+        int b = sourceBgr[offset];
+        int g = sourceBgr[offset + 1];
+        int r = sourceBgr[offset + 2];
+        luminance[i] = (byte)((r * 54 + g * 183 + b * 19) >> 8);
+
+        int x = i % width;
+        int y = i / width;
+        if (x == 0 || y == 0 || x >= width - 1 || y >= height - 1)
+        {
+            magnitude[i] = 0;
+            gxValues[i] = 0;
+            gyValues[i] = 0;
+            return;
+        }
+
+        int gx =
+            -CudaLumaAt(sourceBgr, width, x - 1, y - 1) + CudaLumaAt(sourceBgr, width, x + 1, y - 1) +
+            ((-CudaLumaAt(sourceBgr, width, x - 1, y) + CudaLumaAt(sourceBgr, width, x + 1, y)) << 1) +
+            -CudaLumaAt(sourceBgr, width, x - 1, y + 1) + CudaLumaAt(sourceBgr, width, x + 1, y + 1);
+        int gy =
+            -CudaLumaAt(sourceBgr, width, x - 1, y - 1) - (CudaLumaAt(sourceBgr, width, x, y - 1) << 1) - CudaLumaAt(sourceBgr, width, x + 1, y - 1) +
+            CudaLumaAt(sourceBgr, width, x - 1, y + 1) + (CudaLumaAt(sourceBgr, width, x, y + 1) << 1) + CudaLumaAt(sourceBgr, width, x + 1, y + 1);
+        int absGx = gx < 0 ? -gx : gx;
+        int absGy = gy < 0 ? -gy : gy;
+        int mag = (absGx + absGy) >> 2;
+        magnitude[i] = (byte)(mag > 255 ? 255 : mag);
+        gxValues[i] = (short)(gx < short.MinValue ? short.MinValue : gx > short.MaxValue ? short.MaxValue : gx);
+        gyValues[i] = (short)(gy < short.MinValue ? short.MinValue : gy > short.MaxValue ? short.MaxValue : gy);
+    }
+
+    private static int CudaLumaAt(ArrayView<byte> sourceBgr, int width, int x, int y)
+    {
+        int offset = (y * width + x) * 3;
+        int b = sourceBgr[offset];
+        int g = sourceBgr[offset + 1];
+        int r = sourceBgr[offset + 2];
+        return (r * 54 + g * 183 + b * 19) >> 8;
     }
 
     private enum StrokeEncodeStage
