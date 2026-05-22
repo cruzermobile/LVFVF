@@ -192,7 +192,7 @@ partial class Program
             Console.WriteLine($"Max frames: {options.MaxFrames}");
         }
 
-        Console.WriteLine($"Acceleration: {DescribeAcceleration(acceleration)}");
+        Console.WriteLine($"Acceleration: {DescribeStrokeAcceleration(acceleration)}");
         Console.WriteLine($"Compression: {DescribeCompression(options.CompressionLevel)}");
         Console.WriteLine("OpenCV: not used by convert-strokes hot path");
 
@@ -712,9 +712,15 @@ partial class Program
         }
 
         int maxStrokes = MaxStrokesForFrame(width, height, options.StrokeDensity);
-        return strokes
+        int maxPoints = MaxStrokePointsForFrame(width, height, options.StrokeDensity);
+        int maxPointsPerStroke = MaxStrokePointsPerStroke(options.Quality, options.StrokeDensity);
+        List<StrokePrimitive> selected = strokes
             .OrderByDescending(StrokePriority)
             .Take(maxStrokes)
+            .ToList();
+
+        ApplyStrokePointBudget(selected, maxPoints, maxPointsPerStroke);
+        return selected
             .OrderBy(stroke => stroke.Bounds.Top)
             .ThenBy(stroke => stroke.Bounds.Left)
             .ToList();
@@ -754,14 +760,6 @@ partial class Program
 
             previous = current;
             current = next;
-        }
-
-        if (remaining.Count > 0 && points.Count < component.Count / 2)
-        {
-            foreach (int pixel in remaining)
-            {
-                points.Add(new Point(pixel % width, pixel / width));
-            }
         }
 
         return points;
@@ -886,6 +884,80 @@ partial class Program
         Rectangle bounds = BoundsFor(points);
         PointF center = AveragePoint(points);
         return new StrokePrimitive(0, points, color, intensity, widthByte, glowByte, opacity, bounds, center, StrokePathLength(points), 0);
+    }
+
+    private static void ApplyStrokePointBudget(List<StrokePrimitive> strokes, int maxFramePoints, int maxPointsPerStroke)
+    {
+        int usedPoints = 0;
+        for (int i = strokes.Count - 1; i >= 0; i--)
+        {
+            StrokePrimitive stroke = strokes[i];
+            int target = Math.Min(maxPointsPerStroke, stroke.Points.Count);
+            int remaining = Math.Max(0, maxFramePoints - usedPoints);
+            if (remaining < 2)
+            {
+                strokes.RemoveAt(i);
+                continue;
+            }
+
+            target = Math.Min(target, remaining);
+            if (stroke.Points.Count > target)
+            {
+                List<Point> resampled = ResampleStrokePoints(stroke.Points, target);
+                stroke.Points.Clear();
+                stroke.Points.AddRange(resampled);
+                RefreshStrokeGeometry(stroke);
+            }
+
+            usedPoints += stroke.Points.Count;
+        }
+    }
+
+    private static List<Point> ResampleStrokePoints(IReadOnlyList<Point> points, int targetCount)
+    {
+        if (targetCount >= points.Count)
+        {
+            return points.ToList();
+        }
+
+        if (targetCount <= 2)
+        {
+            return new List<Point> { points[0], points[^1] };
+        }
+
+        List<Point> resampled = new(targetCount);
+        double step = (points.Count - 1) / (double)(targetCount - 1);
+        Point last = new(int.MinValue, int.MinValue);
+        for (int i = 0; i < targetCount; i++)
+        {
+            int index = (int)Math.Round(i * step);
+            index = Math.Clamp(index, 0, points.Count - 1);
+            Point point = points[index];
+            if (i == 0 || i == targetCount - 1 || point != last)
+            {
+                resampled.Add(point);
+                last = point;
+            }
+        }
+
+        if (resampled.Count < 2)
+        {
+            return new List<Point> { points[0], points[^1] };
+        }
+
+        if (resampled[^1] != points[^1])
+        {
+            resampled[^1] = points[^1];
+        }
+
+        return resampled;
+    }
+
+    private static void RefreshStrokeGeometry(StrokePrimitive stroke)
+    {
+        stroke.Bounds = BoundsFor(stroke.Points);
+        stroke.Center = AveragePoint(stroke.Points);
+        stroke.Length = StrokePathLength(stroke.Points);
     }
 
     private static void AssignStrokeIdsAndSmooth(List<StrokePrimitive> strokes, StrokeEncodeState state, int width, int height, StrokeEncodeOptions options)
