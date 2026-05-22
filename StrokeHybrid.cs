@@ -119,6 +119,7 @@ partial class Program
         long totalStrokes = 0;
         long totalStrokePoints = 0;
         long totalResiduals = 0;
+        bool stoppedEarly = false;
 
         while (ReadFullFrame(ffmpeg.StandardOutput.BaseStream, buffer))
         {
@@ -144,12 +145,21 @@ partial class Program
 
             if (options.MaxFrames > 0 && frameCount >= options.MaxFrames)
             {
+                stoppedEarly = true;
                 break;
             }
         }
 
-        ffmpeg.WaitForExit();
-        if (ffmpeg.ExitCode != 0)
+        if (stoppedEarly && !ffmpeg.HasExited)
+        {
+            ffmpeg.Kill(entireProcessTree: true);
+        }
+        else
+        {
+            ffmpeg.WaitForExit();
+        }
+
+        if (!stoppedEarly && ffmpeg.ExitCode != 0)
         {
             throw new InvalidOperationException($"FFmpeg exited with code {ffmpeg.ExitCode}.");
         }
