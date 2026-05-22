@@ -33,19 +33,31 @@ dotnet run -- gpu-info
 
 This folder includes small PowerShell helpers for source-only GitHub syncing. Generated videos and `.lvfb` outputs are ignored by `.gitignore` because they get large quickly.
 
-After creating an empty GitHub repository:
+This local folder is set up to use:
 
-```powershell
-.\scripts\connect-github.ps1 -RepoUrl <repo-url>
+```text
+https://github.com/cruzermobile/LVFVF.git
 ```
 
-To push a snapshot manually:
+To connect or reconnect the folder to that repository:
+
+```powershell
+.\scripts\connect-github.ps1 -RepoUrl https://github.com/cruzermobile/LVFVF.git
+```
+
+To download your dad's changes without uploading anything:
+
+```powershell
+.\scripts\pull-from-github.ps1
+```
+
+To download first, then upload a source snapshot manually:
 
 ```powershell
 .\scripts\sync-to-github.ps1
 ```
 
-To keep watching for source changes and auto-push after the files are quiet for 20 seconds:
+To keep watching for source changes, auto-push after the files are quiet for 20 seconds, and auto-download GitHub changes while the folder is clean:
 
 ```powershell
 .\scripts\watch-and-sync.ps1

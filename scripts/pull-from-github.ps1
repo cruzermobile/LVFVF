@@ -1,7 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$RepoUrl,
-    [string]$Branch = "main"
+    [string]$Branch = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,21 +26,24 @@ if ([string]::IsNullOrWhiteSpace($repoRoot)) {
 
 Set-Location $repoRoot
 
-$existingRemote = git remote get-url origin 2>$null
-if ([string]::IsNullOrWhiteSpace($existingRemote)) {
-    Invoke-Git remote add origin $RepoUrl
-} else {
-    Invoke-Git remote set-url origin $RepoUrl
+if ([string]::IsNullOrWhiteSpace($Branch)) {
+    $Branch = git branch --show-current
 }
 
-Invoke-Git branch -M $Branch
+if ([string]::IsNullOrWhiteSpace($Branch)) {
+    $Branch = "main"
+}
+
+$remote = git remote get-url origin 2>$null
+if ([string]::IsNullOrWhiteSpace($remote)) {
+    throw "No GitHub remote is configured yet. Run .\scripts\connect-github.ps1 -RepoUrl <repo-url> first."
+}
+
 Invoke-Git fetch origin
 
 if (Test-RemoteBranch -RemoteBranch $Branch) {
     Write-Host "Downloading newest changes from origin/$Branch..."
     Invoke-Git pull --rebase --autostash origin $Branch
 } else {
-    Write-Host "No origin/$Branch branch exists yet; the next push will create it."
+    Write-Host "No origin/$Branch branch exists yet. Nothing to download."
 }
-
-Invoke-Git push -u origin $Branch

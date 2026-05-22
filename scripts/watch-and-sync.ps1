@@ -1,5 +1,6 @@
 param(
     [int]$QuietSeconds = 20,
+    [int]$PullIntervalSeconds = 60,
     [string]$Branch = ""
 )
 
@@ -17,17 +18,30 @@ if (-not (Test-Path -LiteralPath $syncScript)) {
     throw "Missing sync script: $syncScript"
 }
 
+$pullScript = Join-Path $repoRoot "scripts\pull-from-github.ps1"
+if (-not (Test-Path -LiteralPath $pullScript)) {
+    throw "Missing pull script: $pullScript"
+}
+
 Write-Host "Watching source changes in $repoRoot"
 Write-Host "Ignored files from .gitignore will not be uploaded."
+Write-Host "When the folder is clean, GitHub changes are downloaded every $PullIntervalSeconds seconds."
 Write-Host "Press Ctrl+C to stop."
 
 $lastStatus = ""
 $lastChange = Get-Date
+$lastPull = (Get-Date).AddSeconds(-$PullIntervalSeconds)
 
 while ($true) {
     $status = (git status --porcelain) -join "`n"
 
     if ([string]::IsNullOrWhiteSpace($status)) {
+        $readyToPull = $PullIntervalSeconds -gt 0 -and ((Get-Date) - $lastPull).TotalSeconds -ge $PullIntervalSeconds
+        if ($readyToPull) {
+            & $pullScript -Branch $Branch
+            $lastPull = Get-Date
+        }
+
         $lastStatus = ""
         Start-Sleep -Seconds 2
         continue
@@ -43,6 +57,7 @@ while ($true) {
     $quietFor = ((Get-Date) - $lastChange).TotalSeconds
     if ($quietFor -ge $QuietSeconds) {
         & $syncScript -Branch $Branch
+        $lastPull = Get-Date
         $lastStatus = ""
         $lastChange = Get-Date
     }
