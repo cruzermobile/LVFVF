@@ -993,7 +993,7 @@ partial class Program
         }
 
         byte[] prediction = RenderStrokePrediction(surfaceColors, strokes, header);
-        int tileSize = Math.Clamp(header.SurfaceCellSize / 2, 10, 24);
+        int tileSize = Math.Clamp(header.SurfaceCellSize / 3, 6, 18);
         int columns = DivRoundUp(header.Width, tileSize);
         int rows = DivRoundUp(header.Height, tileSize);
         int threshold = ResidualErrorThreshold(options.Quality, options.ResidualStrength);
@@ -1039,7 +1039,7 @@ partial class Program
                 if (meanError >= threshold)
                 {
                     Color color = Color.FromArgb((int)(sumR / count), (int)(sumG / count), (int)(sumB / count));
-                    byte opacity = (byte)Math.Clamp(45 + meanError * 4.5, 70, 230);
+                    byte opacity = (byte)Math.Clamp(36 + meanError * 3.2, 54, 190);
                     candidates.Add(new StrokeResidualCandidate(meanError, new StrokeResidualPatch(x0, y0, x1 - x0, y1 - y0, color, opacity)));
                 }
             }
@@ -1069,6 +1069,7 @@ partial class Program
 
     private static void RenderSurfaceCellsToBgr(byte[] frame, Color[] surfaceColors, StrokeHeader header)
     {
+        Color[] corners = BuildSurfaceCornerColors(surfaceColors, header);
         Parallel.For(0, header.SurfaceRows, yCell =>
         {
             int y0 = yCell * header.SurfaceCellSize;
@@ -1077,12 +1078,20 @@ partial class Program
             {
                 int x0 = xCell * header.SurfaceCellSize;
                 int x1 = Math.Min(header.Width, x0 + header.SurfaceCellSize);
-                Color color = surfaceColors[yCell * header.SurfaceColumns + xCell];
+                Color topLeft = corners[yCell * (header.SurfaceColumns + 1) + xCell];
+                Color topRight = corners[yCell * (header.SurfaceColumns + 1) + xCell + 1];
+                Color bottomLeft = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell];
+                Color bottomRight = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell + 1];
+                double yScale = 1.0 / Math.Max(1, y1 - y0);
+                double xScale = 1.0 / Math.Max(1, x1 - x0);
                 for (int y = y0; y < y1; y++)
                 {
+                    double ty = (y - y0) * yScale;
                     int offset = (y * header.Width + x0) * 3;
                     for (int x = x0; x < x1; x++, offset += 3)
                     {
+                        double tx = (x - x0) * xScale;
+                        Color color = BilinearColor(topLeft, topRight, bottomLeft, bottomRight, tx, ty);
                         frame[offset] = color.B;
                         frame[offset + 1] = color.G;
                         frame[offset + 2] = color.R;
@@ -1277,6 +1286,7 @@ partial class Program
 
     private static void AppendSurfaceVertices(List<float> vertices, StrokeHeader header, Color[] surfaceColors)
     {
+        Color[] corners = BuildSurfaceCornerColors(surfaceColors, header);
         for (int yCell = 0; yCell < header.SurfaceRows; yCell++)
         {
             int y0 = yCell * header.SurfaceCellSize;
@@ -1285,8 +1295,30 @@ partial class Program
             {
                 int x0 = xCell * header.SurfaceCellSize;
                 int x1 = Math.Min(header.Width, x0 + header.SurfaceCellSize);
-                Color color = surfaceColors[yCell * header.SurfaceColumns + xCell];
-                AddStrokeRect(vertices, header.Width, header.Height, x0, y0, x1, y1, color, 1.0f);
+                Color topLeft = corners[yCell * (header.SurfaceColumns + 1) + xCell];
+                Color topRight = corners[yCell * (header.SurfaceColumns + 1) + xCell + 1];
+                Color bottomRight = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell + 1];
+                Color bottomLeft = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell];
+                AddStrokeQuad(
+                    vertices,
+                    header.Width,
+                    header.Height,
+                    x0,
+                    y0,
+                    topLeft,
+                    1.0f,
+                    x1,
+                    y0,
+                    topRight,
+                    1.0f,
+                    x1,
+                    y1,
+                    bottomRight,
+                    1.0f,
+                    x0,
+                    y1,
+                    bottomLeft,
+                    1.0f);
             }
         }
     }
@@ -1295,7 +1327,7 @@ partial class Program
     {
         foreach (StrokeResidualPatch residual in residuals)
         {
-            AddStrokeRect(vertices, header.Width, header.Height, residual.X, residual.Y, residual.X + residual.Width, residual.Y + residual.Height, residual.Color, residual.Opacity / 255f);
+            AddFeatheredResidual(vertices, header.Width, header.Height, residual);
         }
     }
 
@@ -1361,12 +1393,17 @@ partial class Program
 
     private static void AddStrokeQuad(List<float> vertices, int width, int height, float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, Color color, float alpha)
     {
-        AddStrokeVertex(vertices, x0, y0, color, alpha, width, height);
-        AddStrokeVertex(vertices, x1, y1, color, alpha, width, height);
-        AddStrokeVertex(vertices, x2, y2, color, alpha, width, height);
-        AddStrokeVertex(vertices, x0, y0, color, alpha, width, height);
-        AddStrokeVertex(vertices, x2, y2, color, alpha, width, height);
-        AddStrokeVertex(vertices, x3, y3, color, alpha, width, height);
+        AddStrokeQuad(vertices, width, height, x0, y0, color, alpha, x1, y1, color, alpha, x2, y2, color, alpha, x3, y3, color, alpha);
+    }
+
+    private static void AddStrokeQuad(List<float> vertices, int width, int height, float x0, float y0, Color c0, float a0, float x1, float y1, Color c1, float a1, float x2, float y2, Color c2, float a2, float x3, float y3, Color c3, float a3)
+    {
+        AddStrokeVertex(vertices, x0, y0, c0, a0, width, height);
+        AddStrokeVertex(vertices, x1, y1, c1, a1, width, height);
+        AddStrokeVertex(vertices, x2, y2, c2, a2, width, height);
+        AddStrokeVertex(vertices, x0, y0, c0, a0, width, height);
+        AddStrokeVertex(vertices, x2, y2, c2, a2, width, height);
+        AddStrokeVertex(vertices, x3, y3, c3, a3, width, height);
     }
 
     private static void AddStrokeVertex(List<float> vertices, float x, float y, Color color, float alpha, int width, int height)
@@ -1396,8 +1433,8 @@ partial class Program
     private static int StrokeSurfaceCellSize(int width, int height, int quality, int surfaceDetail)
     {
         double longEdgeScale = Math.Clamp(Math.Max(width, height) / 1080.0, 0.75, 2.0);
-        double size = (50 - surfaceDetail * 0.30 - quality * 0.11) * longEdgeScale;
-        return Math.Clamp((int)Math.Round(size), 12, 64);
+        double size = (36 - surfaceDetail * 0.22 - quality * 0.08) * longEdgeScale;
+        return Math.Clamp((int)Math.Round(size), 8, 48);
     }
 
     private static int SurfaceDeltaThreshold(int quality, int surfaceDetail)
