@@ -17,6 +17,8 @@ obj/
 *.webm
 *.lvfb
 *.lvfbz
+*.lvfs
+*.lvfsz
 *.lvfz
 *.lvf
 

@@ -18,7 +18,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
-class Program
+partial class Program
 {
     private const int PlaybackBufferSize = 96;
     private const int DefaultQuality = 82;
@@ -59,6 +59,10 @@ class Program
             case "convert-edges":
             case "encode-edges":
                 return ConvertEdgesCommand(remaining);
+            case "convert-strokes":
+            case "encode-strokes":
+            case "strokes":
+                return ConvertStrokesCommand(remaining);
             case "play":
                 return PlayCommand(remaining);
             case "play-gpu":
@@ -254,9 +258,10 @@ class Program
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  LVFVF convert <input-video> [output.lvfb] [--quality 82] [--palette 36] [--dark-filter 65] [--patch-detail 35] [--object-focus 45] [--corrections 100] [--tracer opencv|merged-fast|merged|custom] [--pipeline 1] [--accel auto|cpu|cuda|opencl|hybrid|ffmpeg] [--compression optimal|fast|smallest] [--profile]");
+        Console.WriteLine("  LVFVF convert-strokes <input-video> [output.lvfs] [--quality 82] [--stroke-density 60] [--surface-detail 35] [--residual 20] [--glow 55] [--keyframe 30] [--pipeline 4] [--accel auto|cpu|cuda|opencl|hybrid|ffmpeg] [--compression optimal|fast|smallest] [--profile]");
         Console.WriteLine("  LVFVF play <file.lvf|file.lvfz|file.lvfb> [--renderer cpu|gpu]");
         Console.WriteLine("  LVFVF play-gpu <file.lvfb>");
-        Console.WriteLine("  LVFVF info <file.lvf|file.lvfz|file.lvfb>");
+        Console.WriteLine("  LVFVF info <file.lvf|file.lvfz|file.lvfb|file.lvfs>");
         Console.WriteLine("  LVFVF gpu-info");
         Console.WriteLine();
         Console.WriteLine("Experimental legacy edge mode:");
@@ -269,6 +274,12 @@ class Program
 
     private static void PlayLVF(string lvfPath)
     {
+        if (IsStrokeLvfPath(lvfPath))
+        {
+            PlayStrokeLVF(lvfPath);
+            return;
+        }
+
         if (IsBinaryLvfPath(lvfPath))
         {
             PlayBinaryLVF(lvfPath);
@@ -411,6 +422,12 @@ class Program
 
     private static void PlayGpuLVF(string lvfPath)
     {
+        if (IsStrokeLvfPath(lvfPath))
+        {
+            PlayStrokeLVF(lvfPath);
+            return;
+        }
+
         if (!IsBinaryLvfPath(lvfPath))
         {
             throw new InvalidOperationException("GPU playback currently supports compressed binary LVFVF2 files (.lvfb). Use normal play for text or legacy files.");
@@ -463,6 +480,12 @@ class Program
 
     private static void InspectLVF(string lvfPath)
     {
+        if (IsStrokeLvfPath(lvfPath))
+        {
+            InspectStrokeLVF(lvfPath);
+            return;
+        }
+
         if (IsBinaryLvfPath(lvfPath))
         {
             InspectBinaryLVF(lvfPath);
