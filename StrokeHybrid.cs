@@ -203,7 +203,8 @@ partial class Program
             Console.WriteLine($"Max frames: {options.MaxFrames}");
         }
 
-        Console.WriteLine($"Acceleration: {DescribeStrokeAcceleration(acceleration)}");
+        using StrokeGpuAnalyzer? strokeGpuAnalyzer = StrokeGpuAnalyzer.TryCreate(acceleration);
+        Console.WriteLine($"Acceleration: {DescribeStrokeAcceleration(acceleration, strokeGpuAnalyzer)}");
         Console.WriteLine($"Compression: {DescribeCompression(options.CompressionLevel)}");
         Console.WriteLine("OpenCV: not used by convert-strokes hot path");
 
@@ -242,7 +243,7 @@ partial class Program
         {
             byte[] frameBytes = buffer.ToArray();
             long frameStart = Stopwatch.GetTimestamp();
-            StrokeFrame frame = TraceStrokeFrame(frameCount, frameBytes, header, options, state, profiler);
+            StrokeFrame frame = TraceStrokeFrame(frameCount, frameBytes, header, options, state, profiler, strokeGpuAnalyzer);
             profiler?.Add(StrokeEncodeStage.FrameTotal, frameStart);
 
             long writeStart = Stopwatch.GetTimestamp();
@@ -286,7 +287,7 @@ partial class Program
         profiler?.Print(frameCount);
     }
 
-    private static StrokeFrame TraceStrokeFrame(int frameNumber, byte[] sourceBgr, StrokeHeader header, StrokeEncodeOptions options, StrokeEncodeState state, StrokeEncodeProfiler? profiler)
+    private static StrokeFrame TraceStrokeFrame(int frameNumber, byte[] sourceBgr, StrokeHeader header, StrokeEncodeOptions options, StrokeEncodeState state, StrokeEncodeProfiler? profiler, StrokeGpuAnalyzer? strokeGpuAnalyzer = null)
     {
         bool isKeyframe = frameNumber == 0 || frameNumber % options.KeyframeInterval == 0 || state.SurfaceColors is null;
 
@@ -297,9 +298,8 @@ partial class Program
         profiler?.Add(StrokeEncodeStage.Surfaces, surfaceStart);
 
         long analysisStart = Stopwatch.GetTimestamp();
-        byte[] luminance = BuildStrokeLuminance(sourceBgr, header.Width, header.Height);
-        byte[] blurred = BlurLuminance3x3(luminance, header.Width, header.Height);
-        GradientField gradient = BuildGradientField(blurred, header.Width, header.Height);
+        StrokeAnalysis analysis = strokeGpuAnalyzer?.Analyze(sourceBgr, header.Width, header.Height) ?? AnalyzeStrokeFrameCpu(sourceBgr, header.Width, header.Height);
+        GradientField gradient = analysis.Gradient;
         profiler?.Add(StrokeEncodeStage.Analysis, analysisStart);
 
         long edgeStart = Stopwatch.GetTimestamp();
@@ -984,6 +984,59 @@ partial class Program
         stroke.Bounds = BoundsFor(stroke.Points);
         stroke.Center = AveragePoint(stroke.Points);
         stroke.Length = StrokePathLength(stroke.Points);
+    }
+
+    private static List<StrokePrimitive> BuildSurfaceHatchStrokes(Color[] surfaceColors, StrokeHeader header, StrokeEncodeOptions options)
+    {
+        if (options.SurfaceDetail <= 0)
+        {
+            return new List<StrokePrimitive>();
+        }
+
+        int maxHatches = MaxSurfaceHatches(header.Width, header.Height, options.SurfaceDetail);
+        int totalCells = header.SurfaceColumns * header.SurfaceRows;
+        int stride = Math.Max(1, (int)Math.Ceiling(totalCells / (double)Math.Max(1, maxHatches)));
+        List<StrokePrimitive> hatches = new(Math.Min(maxHatches, totalCells));
+        int phase = Math.Max(1, stride);
+
+        for (int index = 0; index < totalCells && hatches.Count < maxHatches; index += stride)
+        {
+            int xCell = index % header.SurfaceColumns;
+            int yCell = index / header.SurfaceColumns;
+            Color color = surfaceColors[index];
+            double luma = Luminance(color);
+            if (luma > 238 && ((xCell + yCell) % 5 != 0))
+            {
+                continue;
+            }
+
+            int x0 = xCell * header.SurfaceCellSize;
+            int y0 = yCell * header.SurfaceCellSize;
+            int x1 = Math.Min(header.Width - 1, x0 + header.SurfaceCellSize - 1);
+            int y1 = Math.Min(header.Height - 1, y0 + header.SurfaceCellSize - 1);
+            if (x1 <= x0 || y1 <= y0)
+            {
+                continue;
+            }
+
+            int inset = Math.Max(1, header.SurfaceCellSize / 5);
+            bool slash = ((xCell / phase) + yCell) % 2 == 0;
+            Point a = slash
+                ? new Point(x0 + inset, y1 - inset)
+                : new Point(x0 + inset, y0 + inset);
+            Point b = slash
+                ? new Point(x1 - inset, y0 + inset)
+                : new Point(x1 - inset, y1 - inset);
+            int darkness = (int)Math.Clamp(255 - luma, 0, 255);
+            byte opacity = (byte)Math.Clamp(28 + darkness * 0.35 + options.SurfaceDetail * 0.25, 34, 148);
+            byte width = (byte)Math.Clamp(3 + options.Quality / 60, 3, 5);
+            byte glow = (byte)Math.Clamp(options.Glow / 18, 0, 5);
+            byte intensity = (byte)Math.Clamp(80 + darkness * 0.45, 80, 210);
+            Color hatchColor = BlendColor(color, Color.White, Math.Clamp((255 - luma) / 510.0, 0.08, 0.28));
+            hatches.Add(new StrokePrimitive(0, new List<Point> { a, b }, hatchColor, intensity, width, glow, opacity, BoundsFor(new[] { a, b }), AveragePoint(new[] { a, b }), Distance(a, b), 0));
+        }
+
+        return hatches;
     }
 
     private static void AssignStrokeIdsAndSmooth(List<StrokePrimitive> strokes, StrokeEncodeState state, int width, int height, StrokeEncodeOptions options)
@@ -1730,6 +1783,12 @@ partial class Program
     private static int MaxStrokePointsPerStroke(int quality, int strokeDensity)
     {
         return Math.Clamp(70 + quality + strokeDensity / 2, 90, 230);
+    }
+
+    private static int MaxSurfaceHatches(int width, int height, int surfaceDetail)
+    {
+        double megapixels = width * height / 1_000_000.0;
+        return Math.Clamp((int)Math.Round(220 + surfaceDetail * 12 + megapixels * 260), 220, 1800);
     }
 
     private static int ResidualErrorThreshold(int quality, int residualStrength)
