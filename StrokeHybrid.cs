@@ -630,8 +630,6 @@ partial class Program
     private static List<StrokePrimitive> BuildStrokePrimitives(byte[] edgeMask, GradientField gradient, byte[] sourceBgr, int width, int height, StrokeEncodeOptions options)
     {
         bool[] visited = new bool[edgeMask.Length];
-        int[] componentMark = new int[edgeMask.Length];
-        int markToken = 1;
         List<StrokePrimitive> strokes = new();
         Queue<int> queue = new();
         List<int> component = new();
@@ -694,27 +692,18 @@ partial class Program
                 continue;
             }
 
-            int token = markToken++;
-            foreach (int index in component)
+            foreach (List<Point> ordered in OrderStrokeComponentChains(component, width, height, Math.Max(4, minPixels / 2)))
             {
-                componentMark[index] = token;
-            }
+                List<Point> simplified = SimplifyStrokePath(ordered, simplify);
+                double length = StrokePathLength(simplified);
+                if (length < minLength)
+                {
+                    continue;
+                }
 
-            List<Point> ordered = OrderStrokeComponent(component, componentMark, token, width, height);
-            if (ordered.Count < 2)
-            {
-                continue;
+                StrokePrimitive stroke = BuildStrokePrimitive(simplified, gradient, sourceBgr, width, height, options);
+                strokes.Add(stroke);
             }
-
-            List<Point> simplified = SimplifyStrokePath(ordered, simplify);
-            double length = StrokePathLength(simplified);
-            if (length < minLength)
-            {
-                continue;
-            }
-
-            StrokePrimitive stroke = BuildStrokePrimitive(simplified, gradient, sourceBgr, width, height, options);
-            strokes.Add(stroke);
         }
 
         int maxStrokes = MaxStrokesForFrame(width, height, options.StrokeDensity);
@@ -732,17 +721,34 @@ partial class Program
             .ToList();
     }
 
-    private static List<Point> OrderStrokeComponent(List<int> component, int[] componentMark, int token, int width, int height)
+    private static List<List<Point>> OrderStrokeComponentChains(List<int> component, int width, int height, int minChainPixels)
     {
-        int start = component[0];
-        int bestNeighborCount = 9;
-        foreach (int pixel in component)
+        HashSet<int> remaining = component.ToHashSet();
+        List<List<Point>> chains = new();
+        while (remaining.Count >= minChainPixels)
         {
-            int count = CountMarkedNeighbors(pixel, componentMark, token, width, height);
+            int start = PickStrokeChainStart(remaining, width, height);
+            List<Point> chain = TraceStrokeChain(start, remaining, width, height);
+            if (chain.Count >= minChainPixels)
+            {
+                chains.Add(chain);
+            }
+        }
+
+        return chains;
+    }
+
+    private static int PickStrokeChainStart(HashSet<int> remaining, int width, int height)
+    {
+        int bestNeighborCount = 9;
+        int bestPixel = remaining.First();
+        foreach (int pixel in remaining)
+        {
+            int count = CountRemainingNeighbors(pixel, remaining, width, height);
             if (count < bestNeighborCount)
             {
                 bestNeighborCount = count;
-                start = pixel;
+                bestPixel = pixel;
                 if (count <= 1)
                 {
                     break;
@@ -750,8 +756,12 @@ partial class Program
             }
         }
 
-        HashSet<int> remaining = component.ToHashSet();
-        List<Point> points = new(component.Count);
+        return bestPixel;
+    }
+
+    private static List<Point> TraceStrokeChain(int start, HashSet<int> remaining, int width, int height)
+    {
+        List<Point> points = new(remaining.Count);
         int current = start;
         int previous = -1;
 
@@ -821,7 +831,7 @@ partial class Program
         return best;
     }
 
-    private static int CountMarkedNeighbors(int pixel, int[] marks, int token, int width, int height)
+    private static int CountRemainingNeighbors(int pixel, HashSet<int> remaining, int width, int height)
     {
         int x = pixel % width;
         int y = pixel / width;
@@ -847,7 +857,7 @@ partial class Program
                     continue;
                 }
 
-                if (marks[ny * width + nx] == token)
+                if (remaining.Contains(ny * width + nx))
                 {
                     count++;
                 }
