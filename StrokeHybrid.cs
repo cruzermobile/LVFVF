@@ -66,10 +66,12 @@ partial class Program
             extension.Equals(".lvfsz", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string DescribeStrokeAcceleration(AccelerationOptions acceleration)
+    private static string DescribeStrokeAcceleration(AccelerationOptions acceleration, StrokeGpuAnalyzer? strokeGpuAnalyzer)
     {
         string decode = acceleration.UseHardwareDecode ? "FFmpeg hwdecode auto" : "software decode";
-        string analysis = StrokeGpuAnalyzer.CanUse(acceleration) ? "CUDA stroke analysis available" : "CPU stroke analysis";
+        string analysis = strokeGpuAnalyzer is not null
+            ? $"CUDA stroke analysis on ({strokeGpuAnalyzer.DeviceName})"
+            : "CPU stroke analysis";
         return $"{decode}; {analysis}; OpenTK GPU playback";
     }
 
@@ -389,6 +391,13 @@ partial class Program
         });
 
         return luminance;
+    }
+
+    private static StrokeAnalysis AnalyzeStrokeFrameCpu(byte[] sourceBgr, int width, int height)
+    {
+        byte[] luminance = BuildStrokeLuminance(sourceBgr, width, height);
+        byte[] blurred = BlurLuminance3x3(luminance, width, height);
+        return new StrokeAnalysis(BuildGradientField(blurred, width, height));
     }
 
     private static byte[] BlurLuminance3x3(byte[] source, int width, int height)
