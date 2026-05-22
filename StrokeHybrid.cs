@@ -3,6 +3,8 @@ using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using ILGPU;
+using ILGPU.Runtime;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
@@ -13,7 +15,7 @@ using System.Text;
 
 partial class Program
 {
-    private const byte StrokeFileVersion = 1;
+    private const byte StrokeFileVersion = 2;
     private const byte StrokeFrameMarker = 0xF5;
     private const int StrokePlaybackBufferSize = 72;
     private static readonly byte[] StrokeMagic = Encoding.ASCII.GetBytes("LVFS1");
@@ -27,6 +29,7 @@ partial class Program
         int surfaceDetail = TakeIntOption(args, 65, 0, 100, "--surface-detail", "--surfaces");
         int residual = TakeIntOption(args, 12, 0, 100, "--residual", "--residuals");
         int glow = TakeIntOption(args, 38, 0, 100, "--glow");
+        int surfaceOpacity = TakeIntOption(args, 28, 0, 100, "--surface-opacity", "--surface-alpha");
         int keyframeInterval = TakeIntOption(args, 30, 1, 600, "--keyframe", "--keyframes", "--keyframe-interval");
         int pipelineDepth = TakeIntOption(args, 4, 1, Math.Max(1, Environment.ProcessorCount / 2), "--pipeline", "--parallel-frames");
         int maxFrames = TakeIntOption(args, 0, 0, int.MaxValue, "--max-frames", "--frames");
@@ -46,6 +49,7 @@ partial class Program
             surfaceDetail,
             residual,
             glow,
+            surfaceOpacity,
             keyframeInterval,
             pipelineDepth,
             compressionLevel,
@@ -65,7 +69,8 @@ partial class Program
     private static string DescribeStrokeAcceleration(AccelerationOptions acceleration)
     {
         string decode = acceleration.UseHardwareDecode ? "FFmpeg hwdecode auto" : "software decode";
-        return $"{decode}; CPU stroke analysis/render prediction; OpenTK GPU playback. CUDA/OpenCL encode kernels are not wired into convert-strokes yet.";
+        string analysis = StrokeGpuAnalyzer.CanUse(acceleration) ? "CUDA stroke analysis available" : "CPU stroke analysis";
+        return $"{decode}; {analysis}; OpenTK GPU playback";
     }
 
     private static int StrokeSelfTestCommand()
@@ -73,8 +78,8 @@ partial class Program
         const int width = 96;
         const int height = 64;
         int surfaceCellSize = StrokeSurfaceCellSize(width, height, 82, 35);
-        StrokeHeader header = new(width, height, 30, 82, 60, 35, 35, 55, 2, surfaceCellSize, DivRoundUp(width, surfaceCellSize), DivRoundUp(height, surfaceCellSize));
-        StrokeEncodeOptions options = new(82, 70, 35, 35, 55, 2, 1, CompressionLevel.Fastest, false, 0);
+        StrokeHeader header = new(width, height, 30, 82, 60, 35, 35, 55, 32, 2, surfaceCellSize, DivRoundUp(width, surfaceCellSize), DivRoundUp(height, surfaceCellSize));
+        StrokeEncodeOptions options = new(82, 70, 35, 35, 55, 32, 2, 1, CompressionLevel.Fastest, false, 0);
         StrokeEncodeState state = new(header);
 
         byte[] first = BuildSyntheticStrokeTestFrame(width, height, 0);
@@ -189,7 +194,7 @@ partial class Program
 
         Console.WriteLine($"Encoding {videoPath}");
         Console.WriteLine($"Input: {info.Width}x{info.Height} @ {FormatDouble(info.Fps)} fps");
-        Console.WriteLine($"Stroke hybrid: quality {options.Quality}, stroke density {options.StrokeDensity}, surface detail {options.SurfaceDetail}, residual {options.ResidualStrength}, glow {options.Glow}");
+        Console.WriteLine($"Stroke hybrid: quality {options.Quality}, stroke density {options.StrokeDensity}, surface detail {options.SurfaceDetail}, residual {options.ResidualStrength}, glow {options.Glow}, surface opacity {options.SurfaceOpacity}");
         Console.WriteLine($"Surface grid: {surfaceColumns}x{surfaceRows} cells ({surfaceCellSize}px target)");
         Console.WriteLine($"Keyframes: every {options.KeyframeInterval} frame(s)");
         Console.WriteLine($"Pipeline: temporal tracking path, {options.PipelineDepth} requested (decode/analysis kept ordered for stable IDs)");
@@ -213,6 +218,7 @@ partial class Program
             options.SurfaceDetail,
             options.ResidualStrength,
             options.Glow,
+            options.SurfaceOpacity,
             options.KeyframeInterval,
             surfaceCellSize,
             surfaceColumns,
@@ -1889,6 +1895,7 @@ partial class Program
             WriteVarInt(_writer, header.SurfaceDetail);
             WriteVarInt(_writer, header.ResidualStrength);
             WriteVarInt(_writer, header.Glow);
+            WriteVarInt(_writer, header.SurfaceOpacity);
             WriteVarInt(_writer, header.KeyframeInterval);
             WriteVarInt(_writer, header.SurfaceCellSize);
             WriteVarInt(_writer, header.SurfaceColumns);
@@ -2043,7 +2050,7 @@ partial class Program
             }
 
             byte version = _reader.ReadByte();
-            if (version != StrokeFileVersion)
+            if (version is < 1 or > StrokeFileVersion)
             {
                 throw new InvalidDataException($"Unsupported LVFS version: {version}");
             }
@@ -2056,11 +2063,12 @@ partial class Program
             int surfaceDetail = ReadVarInt(_reader);
             int residualStrength = ReadVarInt(_reader);
             int glow = ReadVarInt(_reader);
+            int surfaceOpacity = version >= 2 ? ReadVarInt(_reader) : 100;
             int keyframeInterval = ReadVarInt(_reader);
             int surfaceCellSize = ReadVarInt(_reader);
             int surfaceColumns = ReadVarInt(_reader);
             int surfaceRows = ReadVarInt(_reader);
-            return new StrokeHeader(width, height, fps, quality, strokeDensity, surfaceDetail, residualStrength, glow, keyframeInterval, surfaceCellSize, surfaceColumns, surfaceRows);
+            return new StrokeHeader(width, height, fps, quality, strokeDensity, surfaceDetail, residualStrength, glow, surfaceOpacity, keyframeInterval, surfaceCellSize, surfaceColumns, surfaceRows);
         }
     }
 
@@ -2348,8 +2356,8 @@ partial class Program
         FrameTotal
     }
 
-    private sealed record StrokeEncodeOptions(int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int KeyframeInterval, int PipelineDepth, CompressionLevel CompressionLevel, bool Profile, int MaxFrames);
-    private sealed record StrokeHeader(int Width, int Height, double Fps, int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int KeyframeInterval, int SurfaceCellSize, int SurfaceColumns, int SurfaceRows);
+    private sealed record StrokeEncodeOptions(int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int SurfaceOpacity, int KeyframeInterval, int PipelineDepth, CompressionLevel CompressionLevel, bool Profile, int MaxFrames);
+    private sealed record StrokeHeader(int Width, int Height, double Fps, int Quality, int StrokeDensity, int SurfaceDetail, int ResidualStrength, int Glow, int SurfaceOpacity, int KeyframeInterval, int SurfaceCellSize, int SurfaceColumns, int SurfaceRows);
     private sealed record StrokeFrame(int FrameNumber, bool IsKeyframe, List<StrokeSurfaceChange> SurfaceChanges, List<StrokePrimitive> Strokes, List<StrokeResidualPatch> Residuals);
     private sealed record DecodedStrokeFrame(int FrameNumber, bool IsKeyframe, Color[] SurfaceColors, List<StrokePrimitive> Strokes, List<StrokeResidualPatch> Residuals);
     private sealed record StrokeSurfaceChange(int Index, Color Color);
