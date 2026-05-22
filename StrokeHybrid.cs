@@ -62,6 +62,12 @@ partial class Program
             extension.Equals(".lvfsz", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string DescribeStrokeAcceleration(AccelerationOptions acceleration)
+    {
+        string decode = acceleration.UseHardwareDecode ? "FFmpeg hwdecode auto" : "software decode";
+        return $"{decode}; CPU stroke analysis/render prediction; OpenTK GPU playback. CUDA/OpenCL encode kernels are not wired into convert-strokes yet.";
+    }
+
     private static int StrokeSelfTestCommand()
     {
         const int width = 96;
@@ -570,7 +576,7 @@ partial class Program
             return 255;
         }
 
-        double keepPercent = 0.012 + strokeDensity * 0.00075 + quality * 0.00022;
+        double keepPercent = 0.008 + strokeDensity * 0.00048 + quality * 0.00014;
         int keep = Math.Clamp((int)Math.Round(nonZero * keepPercent), Math.Max(80, nonZero / 300), Math.Max(1, nonZero / 6));
         int accumulated = 0;
         for (int value = 255; value >= 1; value--)
@@ -1662,13 +1668,24 @@ partial class Program
 
     private static double StrokeSimplifyForQuality(int quality, int strokeDensity)
     {
-        return Math.Clamp(3.0 - quality * 0.018 - strokeDensity * 0.006, 0.55, 3.0);
+        return Math.Clamp(3.9 - quality * 0.017 - strokeDensity * 0.005, 0.9, 3.8);
     }
 
     private static int MaxStrokesForFrame(int width, int height, int strokeDensity)
     {
         double megapixels = width * height / 1_000_000.0;
-        return Math.Clamp((int)Math.Round(120 + strokeDensity * 8 + megapixels * 90), 80, 1600);
+        return Math.Clamp((int)Math.Round(90 + strokeDensity * 5.5 + megapixels * 70), 70, 900);
+    }
+
+    private static int MaxStrokePointsForFrame(int width, int height, int strokeDensity)
+    {
+        double megapixels = width * height / 1_000_000.0;
+        return Math.Clamp((int)Math.Round(2600 + strokeDensity * 55 + megapixels * 850), 2800, 14000);
+    }
+
+    private static int MaxStrokePointsPerStroke(int quality, int strokeDensity)
+    {
+        return Math.Clamp(54 + quality + strokeDensity / 3, 72, 170);
     }
 
     private static int ResidualErrorThreshold(int quality, int residualStrength)
