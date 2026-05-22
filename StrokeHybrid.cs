@@ -1073,7 +1073,7 @@ partial class Program
             return new List<StrokeResidualPatch>();
         }
 
-        byte[] prediction = RenderStrokePrediction(surfaceColors, strokes, header);
+        Color[] corners = BuildSurfaceCornerColors(surfaceColors, header);
         int tileSize = Math.Clamp(header.SurfaceCellSize / 3, 6, 18);
         int columns = DivRoundUp(header.Width, tileSize);
         int rows = DivRoundUp(header.Height, tileSize);
@@ -1088,6 +1088,7 @@ partial class Program
             {
                 int x0 = xCell * tileSize;
                 int x1 = Math.Min(header.Width, x0 + tileSize);
+                Color predicted = SurfaceDisplayColorAtPixel(surfaceColors, corners, header, (x0 + x1) / 2, (y0 + y1) / 2);
                 long sumError = 0;
                 long sumB = 0;
                 long sumG = 0;
@@ -1099,9 +1100,9 @@ partial class Program
                     int offset = (y * header.Width + x0) * 3;
                     for (int x = x0; x < x1; x++, offset += 3)
                     {
-                        int db = Math.Abs(sourceBgr[offset] - prediction[offset]);
-                        int dg = Math.Abs(sourceBgr[offset + 1] - prediction[offset + 1]);
-                        int dr = Math.Abs(sourceBgr[offset + 2] - prediction[offset + 2]);
+                        int db = Math.Abs(sourceBgr[offset] - predicted.B);
+                        int dg = Math.Abs(sourceBgr[offset + 1] - predicted.G);
+                        int dr = Math.Abs(sourceBgr[offset + 2] - predicted.R);
                         int error = (db + dg + dr) / 3;
                         sumError += error;
                         sumB += sourceBgr[offset];
@@ -1249,6 +1250,24 @@ partial class Program
     {
         Color smooth = BilinearColor(topLeft, topRight, bottomLeft, bottomRight, tx, ty);
         return BlendColor(center, smooth, 0.28);
+    }
+
+    private static Color SurfaceDisplayColorAtPixel(Color[] surfaceColors, Color[] corners, StrokeHeader header, int x, int y)
+    {
+        int cellX = Math.Clamp(x / Math.Max(1, header.SurfaceCellSize), 0, header.SurfaceColumns - 1);
+        int cellY = Math.Clamp(y / Math.Max(1, header.SurfaceCellSize), 0, header.SurfaceRows - 1);
+        int x0 = cellX * header.SurfaceCellSize;
+        int y0 = cellY * header.SurfaceCellSize;
+        int x1 = Math.Min(header.Width, x0 + header.SurfaceCellSize);
+        int y1 = Math.Min(header.Height, y0 + header.SurfaceCellSize);
+        double tx = (x - x0) / (double)Math.Max(1, x1 - x0);
+        double ty = (y - y0) / (double)Math.Max(1, y1 - y0);
+        Color center = surfaceColors[cellY * header.SurfaceColumns + cellX];
+        Color topLeft = corners[cellY * (header.SurfaceColumns + 1) + cellX];
+        Color topRight = corners[cellY * (header.SurfaceColumns + 1) + cellX + 1];
+        Color bottomLeft = corners[(cellY + 1) * (header.SurfaceColumns + 1) + cellX];
+        Color bottomRight = corners[(cellY + 1) * (header.SurfaceColumns + 1) + cellX + 1];
+        return SurfaceDisplayColor(center, topLeft, topRight, bottomLeft, bottomRight, tx, ty);
     }
 
     private static void DrawStrokeToBgr(byte[] frame, int width, int height, StrokePrimitive stroke, int strokeWidth, double alpha)
