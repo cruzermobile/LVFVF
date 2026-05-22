@@ -24,7 +24,7 @@ dotnet run -- convert input.mp4 output.lvfb --quality 88 --accel auto --pipeline
 dotnet run -- convert input.mp4 output.lvfb --tracer merged-fast --corrections 0 --profile
 dotnet run -- convert input.mp4 output.lvfb --tracer merged --profile
 dotnet run -- convert input.mp4 output.lvfb --tracer custom --profile
-dotnet run -- convert-strokes input.mp4 output.lvfs --quality 82 --stroke-density 78 --surface-detail 65 --residual 12 --glow 38 --keyframe 30 --pipeline 4 --profile
+dotnet run -- convert-strokes input.mp4 output.lvfs --quality 82 --stroke-density 78 --surface-detail 65 --surface-opacity 28 --residual 12 --glow 38 --keyframe 30 --pipeline 4 --profile
 dotnet run -- convert-strokes input.mp4 output.lvfs --max-frames 30 --profile
 dotnet run -- play output.lvfb
 dotnet run -- play output.lvfs
@@ -87,6 +87,7 @@ Stroke-hybrid options:
 
 - `--stroke-density`: 0-100. Controls how many adaptive gradient strokes survive pruning.
 - `--surface-detail`: 0-100. Controls the coarse surface grid size. Surfaces always cover the whole frame so missing areas do not turn into black holes. The default is now much denser to avoid the old large-pixel look.
+- `--surface-opacity`: 0-100. Default is `28`. Keeps the raster-like fallback faint so vector strokes and hatching carry the image instead of an opaque pixel grid.
 - `--residual`: 0-100. Adds capped high-error residual rectangles after the surface/stroke prediction. Default is intentionally low so it does not become a hidden raster video.
 - `--glow`: 0-100. Controls stroke glow radius and brightness in the GPU renderer.
 - `--keyframe`: frame interval for full surface refreshes in `.lvfs`.
@@ -122,7 +123,7 @@ This is not a full GPU codec yet. The default contour extraction and residual co
 For a faster but less detailed preview, lower stroke density before lowering surface detail:
 
 ```powershell
-dotnet run -- convert-strokes input.mp4 preview.lvfs --stroke-density 45 --surface-detail 65 --residual 8 --max-frames 120 --profile
+dotnet run -- convert-strokes input.mp4 preview.lvfs --stroke-density 45 --surface-detail 65 --surface-opacity 22 --residual 8 --max-frames 120 --profile
 ```
 
 The experimental `--tracer merged-fast` path applies a tiny blur and snaps very close colors together before the usual palette/contour pass. It is meant for quick testing of neighbor-style grouping without the very slow union/merge tracer.

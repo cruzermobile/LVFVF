@@ -2569,6 +2569,7 @@ partial class Program
     private sealed record StrokeSurfaceChange(int Index, Color Color);
     private sealed record StrokeResidualPatch(int X, int Y, int Width, int Height, Color Color, byte Opacity);
     private sealed record StrokeResidualCandidate(double Error, StrokeResidualPatch Patch);
+    private sealed record StrokeAnalysis(GradientField Gradient);
     private sealed record GradientField(byte[] Magnitude, short[] Gx, short[] Gy);
     private sealed record StrokeGpuFrameData(float[] Vertices)
     {

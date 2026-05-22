@@ -261,7 +261,7 @@ partial class Program
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  LVFVF convert <input-video> [output.lvfb] [--quality 82] [--palette 36] [--dark-filter 65] [--patch-detail 35] [--object-focus 45] [--corrections 100] [--tracer opencv|merged-fast|merged|custom] [--pipeline 1] [--accel auto|cpu|cuda|opencl|hybrid|ffmpeg] [--compression optimal|fast|smallest] [--profile]");
-        Console.WriteLine("  LVFVF convert-strokes <input-video> [output.lvfs] [--quality 82] [--stroke-density 78] [--surface-detail 65] [--residual 12] [--glow 38] [--keyframe 30] [--pipeline 4] [--max-frames 0] [--accel auto|cpu|cuda|opencl|hybrid|ffmpeg] [--compression optimal|fast|smallest] [--profile]");
+        Console.WriteLine("  LVFVF convert-strokes <input-video> [output.lvfs] [--quality 82] [--stroke-density 78] [--surface-detail 65] [--surface-opacity 28] [--residual 12] [--glow 38] [--keyframe 30] [--pipeline 4] [--max-frames 0] [--accel auto|cpu|cuda|opencl|hybrid|ffmpeg] [--compression optimal|fast|smallest] [--profile]");
         Console.WriteLine("  LVFVF play <file.lvf|file.lvfz|file.lvfb> [--renderer cpu|gpu]");
         Console.WriteLine("  LVFVF play-gpu <file.lvfb>");
         Console.WriteLine("  LVFVF info <file.lvf|file.lvfz|file.lvfb|file.lvfs>");
