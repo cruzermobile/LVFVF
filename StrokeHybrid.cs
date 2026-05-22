@@ -313,6 +313,7 @@ partial class Program
 
         long trackStart = Stopwatch.GetTimestamp();
         AssignStrokeIdsAndSmooth(strokes, state, header.Width, header.Height, options);
+        strokes.AddRange(BuildSurfaceHatchStrokes(currentSurface, header, options));
         profiler?.Add(StrokeEncodeStage.TrackStrokes, trackStart);
 
         long residualStart = Stopwatch.GetTimestamp();
@@ -1191,9 +1192,10 @@ partial class Program
                     {
                         double tx = (x - x0) * xScale;
                         Color color = SurfaceDisplayColor(center, topLeft, topRight, bottomLeft, bottomRight, tx, ty);
-                        frame[offset] = color.B;
-                        frame[offset + 1] = color.G;
-                        frame[offset + 2] = color.R;
+                        double alpha = header.SurfaceOpacity / 100.0;
+                        frame[offset] = BlendByte(0, color.B, alpha);
+                        frame[offset + 1] = BlendByte(0, color.G, alpha);
+                        frame[offset + 2] = BlendByte(0, color.R, alpha);
                     }
                 }
             }
@@ -1440,6 +1442,7 @@ partial class Program
         Console.WriteLine($"Surface detail: {header.SurfaceDetail}");
         Console.WriteLine($"Residual: {header.ResidualStrength}");
         Console.WriteLine($"Glow: {header.Glow}");
+        Console.WriteLine($"Surface opacity: {header.SurfaceOpacity}");
         Console.WriteLine($"Surface grid: {header.SurfaceColumns}x{header.SurfaceRows}");
         Console.WriteLine($"Frames: {frames}");
         Console.WriteLine($"Keyframes: {keyframes}");
@@ -1485,6 +1488,12 @@ partial class Program
                 Color topRight = corners[yCell * (header.SurfaceColumns + 1) + xCell + 1];
                 Color bottomRight = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell + 1];
                 Color bottomLeft = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell];
+                float surfaceAlpha = header.SurfaceOpacity / 100f;
+                if (surfaceAlpha <= 0)
+                {
+                    continue;
+                }
+
                 int xSteps = SurfaceRenderSubdivisions(x1 - x0);
                 int ySteps = SurfaceRenderSubdivisions(y1 - y0);
                 for (int sy = 0; sy < ySteps; sy++)
@@ -1498,7 +1507,7 @@ partial class Program
                         float xb = x0 + (x1 - x0) * (sx + 1) / (float)xSteps;
                         double tx = (sx + 0.5) / xSteps;
                         Color color = SurfaceDisplayColor(center, topLeft, topRight, bottomLeft, bottomRight, tx, ty);
-                        AddStrokeRect(vertices, header.Width, header.Height, xa, ya, xb, yb, color, 1.0f);
+                        AddStrokeRect(vertices, header.Width, header.Height, xa, ya, xb, yb, color, surfaceAlpha);
                     }
                 }
             }
