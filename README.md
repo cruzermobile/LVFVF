@@ -12,6 +12,8 @@ It is not a finished codec, but the structure is closer to a practical vector-vi
 - the encoder renders its own first pass, finds visible leftover error, groups that error by source color, and stores targeted correction regions
 - regions are matched against the previous frame to keep stable shape IDs when possible
 
+There is also a newer experimental `LVFS1` stroke-hybrid path. It is built around coarse full-frame surfaces plus persistent luminous strokes and capped residual patches. Its encoder works on raw byte buffers and does not use OpenCV in the stroke hot path.
+
 ## Commands
 
 ```powershell
@@ -22,10 +24,13 @@ dotnet run -- convert input.mp4 output.lvfb --quality 88 --accel auto --pipeline
 dotnet run -- convert input.mp4 output.lvfb --tracer merged-fast --corrections 0 --profile
 dotnet run -- convert input.mp4 output.lvfb --tracer merged --profile
 dotnet run -- convert input.mp4 output.lvfb --tracer custom --profile
+dotnet run -- convert-strokes input.mp4 output.lvfs --quality 82 --stroke-density 60 --surface-detail 35 --residual 20 --glow 55 --keyframe 30 --pipeline 4 --profile
+dotnet run -- convert-strokes input.mp4 output.lvfs --max-frames 30 --profile
 dotnet run -- play output.lvfb
+dotnet run -- play output.lvfs
 dotnet run -- play output.lvfb --renderer gpu
-dotnet run -- play-gpu output.lvfb
-dotnet run -- info output.lvfb
+dotnet run -- play-gpu output.lvfs
+dotnet run -- info output.lvfs
 dotnet run -- gpu-info
 ```
 
@@ -77,12 +82,22 @@ Options:
 - `--compression`: `optimal`, `fast`, or `smallest`. `optimal` is the default and is usually the best balance for `.lvfb`.
 - `--profile`: prints per-stage encode timing so bottlenecks are visible.
 
+Stroke-hybrid options:
+
+- `--stroke-density`: 0-100. Controls how many adaptive gradient strokes survive pruning.
+- `--surface-detail`: 0-100. Controls the coarse surface grid size. Surfaces always cover the whole frame so missing areas do not turn into black holes.
+- `--residual`: 0-100. Adds capped high-error residual rectangles after the surface/stroke prediction. Default is intentionally low so it does not become a hidden raster video.
+- `--glow`: 0-100. Controls stroke glow radius and brightness in the GPU renderer.
+- `--keyframe`: frame interval for full surface refreshes in `.lvfs`.
+- `--max-frames`: debug cap for quick test encodes.
+
 Playback:
 
 - normal `play` uses the older OpenCV renderer.
 - `play --renderer gpu` and `play-gpu` use the new OpenGL renderer for `.lvfb` files.
+- `.lvfs` stroke-hybrid files always use the OpenGL stroke renderer.
 
-Use `.lvfb` for compressed binary output. `.lvfz` still writes Brotli-compressed text for debugging, and plain `.lvf` still works as raw text, but both text forms are bulkier than the binary format.
+Use `.lvfs` for the stroke-hybrid experiment and `.lvfb` for the older compressed binary region output. `.lvfz` still writes Brotli-compressed text for debugging, and plain `.lvf` still works as raw text, but both text forms are bulkier than the binary formats.
 
 FFmpeg and ffprobe need to be available on `PATH` for conversion.
 
@@ -101,6 +116,8 @@ Modes:
 
 This is not a full GPU codec yet. The default contour extraction and residual correction stages still run through OpenCV's CPU path, but palette labeling now has a real CUDA path, the mask-building stage avoids repeated full-frame scans, and neighboring frames reuse/adapt the palette to avoid reclustering from scratch every frame. Playback has a separate GPU path that tessellates LVFVF2 polygons and draws them through OpenGL instead of OpenCV.
 
+`convert-strokes` is separate from the older region path. It keeps FFmpeg for raw frame decode, then uses LVFVF-owned byte-buffer analysis for luminance, blur, Sobel gradients, adaptive thresholding, edge linking, stroke tracking, surface coverage, residual selection, and `.lvfs` writing. OpenCV is not used in that hot path.
+
 The experimental `--tracer merged-fast` path applies a tiny blur and snaps very close colors together before the usual palette/contour pass. It is meant for quick testing of neighbor-style grouping without the very slow union/merge tracer.
 
 The experimental `--tracer merged` path follows a fuller region-merge pipeline instead of a palette-first pipeline. It starts from adjacent same/similar pixels in the original frame, uses a tiny blur only to decide whether neighboring groups should merge, then builds a group-derived merge palette so large background areas do not dominate the merge decision as strongly. Region colors are averaged from their source pixels rather than copied directly from the palette. This is a diagnostic quality experiment and can still look worse than the default path because it does not yet understand semantic object boundaries.
@@ -111,7 +128,21 @@ The experimental `--tracer custom` path flood-fills connected palette-label regi
 
 ## GPU Playback
 
-The GPU player currently supports `.lvfb` region files. It reads compressed binary LVFVF2 frames, converts polygons to triangles, uploads them to a vertex buffer, and lets the graphics card draw the frame. This is the first replacement piece for a future GPU-first engine.
+The GPU player supports `.lvfb` region files and `.lvfs` stroke-hybrid files. `.lvfb` playback tessellates polygons into triangles. `.lvfs` playback draws full-frame surface cells, residual rectangles, and thick/glowing stroke quads through OpenGL.
+
+## LVFS1 Stroke-Hybrid Format
+
+The stroke-hybrid format is `.lvfs`: a Brotli-compressed binary stream with an `LVFS1` header, raw RGB colors, variable-length integers, keyframe flags, surface-cell deltas, persistent stroke records, and residual patch records.
+
+Each decoded frame is rendered as:
+
+```text
+coarse surface cells covering the full frame
++ capped residual patches
++ persistent colored strokes with width, intensity, opacity, and glow
+```
+
+The first version stores polyline strokes. Curve and arc fitting can be added later without changing the main idea: the important primitive is a tracked stroke ID, not a one-frame filled blob.
 
 ## LVFVF2 Format
 
