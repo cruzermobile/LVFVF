@@ -86,7 +86,7 @@ Options:
 Stroke-hybrid options:
 
 - `--stroke-density`: 0-100. Controls how many adaptive gradient strokes survive pruning.
-- `--surface-detail`: 0-100. Controls the coarse surface grid size. Surfaces always cover the whole frame so missing areas do not turn into black holes, and playback interpolates neighboring cells to avoid a blocky tile look.
+- `--surface-detail`: 0-100. Controls the coarse surface grid size. Surfaces always cover the whole frame so missing areas do not turn into black holes. Playback uses small mostly-local subtiles to avoid the old blocky look without turning the whole frame into a blurry gradient.
 - `--residual`: 0-100. Adds capped high-error residual rectangles after the surface/stroke prediction. Default is intentionally low so it does not become a hidden raster video.
 - `--glow`: 0-100. Controls stroke glow radius and brightness in the GPU renderer.
 - `--keyframe`: frame interval for full surface refreshes in `.lvfs`.
@@ -117,7 +117,7 @@ Modes:
 
 This is not a full GPU codec yet. The default contour extraction and residual correction stages still run through OpenCV's CPU path, but palette labeling now has a real CUDA path, the mask-building stage avoids repeated full-frame scans, and neighboring frames reuse/adapt the palette to avoid reclustering from scratch every frame. Playback has a separate GPU path that tessellates LVFVF2 polygons and draws them through OpenGL instead of OpenCV.
 
-`convert-strokes` is separate from the older region path. It keeps FFmpeg for raw frame decode, then uses LVFVF-owned byte-buffer analysis for luminance, blur, Sobel gradients, adaptive thresholding, edge linking, stroke tracking, surface coverage, residual selection, and `.lvfs` writing. OpenCV is not used in that hot path.
+`convert-strokes` is separate from the older region path. It keeps FFmpeg for raw frame decode, then uses LVFVF-owned byte-buffer analysis for luminance, blur, Sobel gradients, adaptive thresholding, edge linking, stroke tracking, surface coverage, residual selection, and `.lvfs` writing. OpenCV is not used in that hot path. CUDA/OpenCL kernels are not wired into `convert-strokes` yet; the current GPU work is hardware decode when available and OpenTK playback.
 
 The experimental `--tracer merged-fast` path applies a tiny blur and snaps very close colors together before the usual palette/contour pass. It is meant for quick testing of neighbor-style grouping without the very slow union/merge tracer.
 
@@ -129,7 +129,7 @@ The experimental `--tracer custom` path flood-fills connected palette-label regi
 
 ## GPU Playback
 
-The GPU player supports `.lvfb` region files and `.lvfs` stroke-hybrid files. `.lvfb` playback tessellates polygons into triangles. `.lvfs` playback draws interpolated full-frame surface cells, feathered residual patches, and thick/glowing stroke quads through OpenGL.
+The GPU player supports `.lvfb` region files and `.lvfs` stroke-hybrid files. `.lvfb` playback tessellates polygons into triangles. `.lvfs` playback draws mostly-local surface subtiles, feathered residual patches, and capped thick/glowing stroke quads through OpenGL.
 
 ## LVFS1 Stroke-Hybrid Format
 
