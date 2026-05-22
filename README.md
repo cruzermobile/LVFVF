@@ -86,7 +86,7 @@ Options:
 Stroke-hybrid options:
 
 - `--stroke-density`: 0-100. Controls how many adaptive gradient strokes survive pruning.
-- `--surface-detail`: 0-100. Controls the coarse surface grid size. Surfaces always cover the whole frame so missing areas do not turn into black holes.
+- `--surface-detail`: 0-100. Controls the coarse surface grid size. Surfaces always cover the whole frame so missing areas do not turn into black holes, and playback interpolates neighboring cells to avoid a blocky tile look.
 - `--residual`: 0-100. Adds capped high-error residual rectangles after the surface/stroke prediction. Default is intentionally low so it does not become a hidden raster video.
 - `--glow`: 0-100. Controls stroke glow radius and brightness in the GPU renderer.
 - `--keyframe`: frame interval for full surface refreshes in `.lvfs`.
@@ -129,7 +129,7 @@ The experimental `--tracer custom` path flood-fills connected palette-label regi
 
 ## GPU Playback
 
-The GPU player supports `.lvfb` region files and `.lvfs` stroke-hybrid files. `.lvfb` playback tessellates polygons into triangles. `.lvfs` playback draws full-frame surface cells, residual rectangles, and thick/glowing stroke quads through OpenGL.
+The GPU player supports `.lvfb` region files and `.lvfs` stroke-hybrid files. `.lvfb` playback tessellates polygons into triangles. `.lvfs` playback draws interpolated full-frame surface cells, feathered residual patches, and thick/glowing stroke quads through OpenGL.
 
 ## LVFS1 Stroke-Hybrid Format
 
