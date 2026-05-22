@@ -1101,6 +1101,68 @@ partial class Program
         });
     }
 
+    private static Color[] BuildSurfaceCornerColors(Color[] surfaceColors, StrokeHeader header)
+    {
+        int cornerColumns = header.SurfaceColumns + 1;
+        int cornerRows = header.SurfaceRows + 1;
+        Color[] corners = new Color[checked(cornerColumns * cornerRows)];
+
+        for (int y = 0; y < cornerRows; y++)
+        {
+            for (int x = 0; x < cornerColumns; x++)
+            {
+                long sumR = 0;
+                long sumG = 0;
+                long sumB = 0;
+                int count = 0;
+
+                for (int dy = -1; dy <= 0; dy++)
+                {
+                    int cellY = y + dy;
+                    if (cellY < 0 || cellY >= header.SurfaceRows)
+                    {
+                        continue;
+                    }
+
+                    for (int dx = -1; dx <= 0; dx++)
+                    {
+                        int cellX = x + dx;
+                        if (cellX < 0 || cellX >= header.SurfaceColumns)
+                        {
+                            continue;
+                        }
+
+                        Color color = surfaceColors[cellY * header.SurfaceColumns + cellX];
+                        sumR += color.R;
+                        sumG += color.G;
+                        sumB += color.B;
+                        count++;
+                    }
+                }
+
+                corners[y * cornerColumns + x] = count == 0
+                    ? Color.Black
+                    : Color.FromArgb((int)(sumR / count), (int)(sumG / count), (int)(sumB / count));
+            }
+        }
+
+        return corners;
+    }
+
+    private static Color BilinearColor(Color topLeft, Color topRight, Color bottomLeft, Color bottomRight, double tx, double ty)
+    {
+        double topR = topLeft.R + (topRight.R - topLeft.R) * tx;
+        double topG = topLeft.G + (topRight.G - topLeft.G) * tx;
+        double topB = topLeft.B + (topRight.B - topLeft.B) * tx;
+        double bottomR = bottomLeft.R + (bottomRight.R - bottomLeft.R) * tx;
+        double bottomG = bottomLeft.G + (bottomRight.G - bottomLeft.G) * tx;
+        double bottomB = bottomLeft.B + (bottomRight.B - bottomLeft.B) * tx;
+        return Color.FromArgb(
+            ClampByte((int)Math.Round(topR + (bottomR - topR) * ty)),
+            ClampByte((int)Math.Round(topG + (bottomG - topG) * ty)),
+            ClampByte((int)Math.Round(topB + (bottomB - topB) * ty)));
+    }
+
     private static void DrawStrokeToBgr(byte[] frame, int width, int height, StrokePrimitive stroke, int strokeWidth, double alpha)
     {
         if (stroke.Points.Count == 0)
@@ -1329,6 +1391,56 @@ partial class Program
         {
             AddFeatheredResidual(vertices, header.Width, header.Height, residual);
         }
+    }
+
+    private static void AddFeatheredResidual(List<float> vertices, int width, int height, StrokeResidualPatch residual)
+    {
+        float x0 = Math.Clamp(residual.X, 0, width);
+        float y0 = Math.Clamp(residual.Y, 0, height);
+        float x1 = Math.Clamp(residual.X + residual.Width, 0, width);
+        float y1 = Math.Clamp(residual.Y + residual.Height, 0, height);
+        if (x1 <= x0 || y1 <= y0)
+        {
+            return;
+        }
+
+        float alpha = residual.Opacity / 255f;
+        float feather = Math.Clamp(Math.Min(x1 - x0, y1 - y0) * 0.33f, 2f, 7f);
+        float xi0 = x0 + feather;
+        float yi0 = y0 + feather;
+        float xi1 = x1 - feather;
+        float yi1 = y1 - feather;
+        if (xi1 <= xi0 || yi1 <= yi0)
+        {
+            AddStrokeRect(vertices, width, height, x0, y0, x1, y1, residual.Color, alpha * 0.55f);
+            return;
+        }
+
+        AddStrokeRect(vertices, width, height, xi0, yi0, xi1, yi1, residual.Color, alpha);
+
+        AddStrokeQuad(vertices, width, height,
+            x0, y0, residual.Color, 0f,
+            x1, y0, residual.Color, 0f,
+            xi1, yi0, residual.Color, alpha,
+            xi0, yi0, residual.Color, alpha);
+
+        AddStrokeQuad(vertices, width, height,
+            xi0, yi1, residual.Color, alpha,
+            xi1, yi1, residual.Color, alpha,
+            x1, y1, residual.Color, 0f,
+            x0, y1, residual.Color, 0f);
+
+        AddStrokeQuad(vertices, width, height,
+            x0, y0, residual.Color, 0f,
+            xi0, yi0, residual.Color, alpha,
+            xi0, yi1, residual.Color, alpha,
+            x0, y1, residual.Color, 0f);
+
+        AddStrokeQuad(vertices, width, height,
+            xi1, yi0, residual.Color, alpha,
+            x1, y0, residual.Color, 0f,
+            x1, y1, residual.Color, 0f,
+            xi1, yi1, residual.Color, alpha);
     }
 
     private static void AppendStrokeVertices(List<float> vertices, int width, int height, StrokePrimitive stroke, bool glowPass)
