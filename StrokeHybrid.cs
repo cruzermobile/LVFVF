@@ -888,16 +888,15 @@ partial class Program
 
     private static void ApplyStrokePointBudget(List<StrokePrimitive> strokes, int maxFramePoints, int maxPointsPerStroke)
     {
+        List<StrokePrimitive> kept = new(strokes.Count);
         int usedPoints = 0;
-        for (int i = strokes.Count - 1; i >= 0; i--)
+        foreach (StrokePrimitive stroke in strokes)
         {
-            StrokePrimitive stroke = strokes[i];
             int target = Math.Min(maxPointsPerStroke, stroke.Points.Count);
             int remaining = Math.Max(0, maxFramePoints - usedPoints);
             if (remaining < 2)
             {
-                strokes.RemoveAt(i);
-                continue;
+                break;
             }
 
             target = Math.Min(target, remaining);
@@ -910,7 +909,11 @@ partial class Program
             }
 
             usedPoints += stroke.Points.Count;
+            kept.Add(stroke);
         }
+
+        strokes.Clear();
+        strokes.AddRange(kept);
     }
 
     private static List<Point> ResampleStrokePoints(IReadOnlyList<Point> points, int targetCount)
@@ -1150,6 +1153,7 @@ partial class Program
             {
                 int x0 = xCell * header.SurfaceCellSize;
                 int x1 = Math.Min(header.Width, x0 + header.SurfaceCellSize);
+                Color center = surfaceColors[yCell * header.SurfaceColumns + xCell];
                 Color topLeft = corners[yCell * (header.SurfaceColumns + 1) + xCell];
                 Color topRight = corners[yCell * (header.SurfaceColumns + 1) + xCell + 1];
                 Color bottomLeft = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell];
@@ -1163,7 +1167,7 @@ partial class Program
                     for (int x = x0; x < x1; x++, offset += 3)
                     {
                         double tx = (x - x0) * xScale;
-                        Color color = BilinearColor(topLeft, topRight, bottomLeft, bottomRight, tx, ty);
+                        Color color = SurfaceDisplayColor(center, topLeft, topRight, bottomLeft, bottomRight, tx, ty);
                         frame[offset] = color.B;
                         frame[offset + 1] = color.G;
                         frame[offset + 2] = color.R;
@@ -1233,6 +1237,12 @@ partial class Program
             ClampByte((int)Math.Round(topR + (bottomR - topR) * ty)),
             ClampByte((int)Math.Round(topG + (bottomG - topG) * ty)),
             ClampByte((int)Math.Round(topB + (bottomB - topB) * ty)));
+    }
+
+    private static Color SurfaceDisplayColor(Color center, Color topLeft, Color topRight, Color bottomLeft, Color bottomRight, double tx, double ty)
+    {
+        Color smooth = BilinearColor(topLeft, topRight, bottomLeft, bottomRight, tx, ty);
+        return BlendColor(center, smooth, 0.28);
     }
 
     private static void DrawStrokeToBgr(byte[] frame, int width, int height, StrokePrimitive stroke, int strokeWidth, double alpha)
@@ -1429,30 +1439,27 @@ partial class Program
             {
                 int x0 = xCell * header.SurfaceCellSize;
                 int x1 = Math.Min(header.Width, x0 + header.SurfaceCellSize);
+                Color center = surfaceColors[yCell * header.SurfaceColumns + xCell];
                 Color topLeft = corners[yCell * (header.SurfaceColumns + 1) + xCell];
                 Color topRight = corners[yCell * (header.SurfaceColumns + 1) + xCell + 1];
                 Color bottomRight = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell + 1];
                 Color bottomLeft = corners[(yCell + 1) * (header.SurfaceColumns + 1) + xCell];
-                AddStrokeQuad(
-                    vertices,
-                    header.Width,
-                    header.Height,
-                    x0,
-                    y0,
-                    topLeft,
-                    1.0f,
-                    x1,
-                    y0,
-                    topRight,
-                    1.0f,
-                    x1,
-                    y1,
-                    bottomRight,
-                    1.0f,
-                    x0,
-                    y1,
-                    bottomLeft,
-                    1.0f);
+                int xSteps = SurfaceRenderSubdivisions(x1 - x0);
+                int ySteps = SurfaceRenderSubdivisions(y1 - y0);
+                for (int sy = 0; sy < ySteps; sy++)
+                {
+                    float ya = y0 + (y1 - y0) * sy / (float)ySteps;
+                    float yb = y0 + (y1 - y0) * (sy + 1) / (float)ySteps;
+                    double ty = (sy + 0.5) / ySteps;
+                    for (int sx = 0; sx < xSteps; sx++)
+                    {
+                        float xa = x0 + (x1 - x0) * sx / (float)xSteps;
+                        float xb = x0 + (x1 - x0) * (sx + 1) / (float)xSteps;
+                        double tx = (sx + 0.5) / xSteps;
+                        Color color = SurfaceDisplayColor(center, topLeft, topRight, bottomLeft, bottomRight, tx, ty);
+                        AddStrokeRect(vertices, header.Width, header.Height, xa, ya, xb, yb, color, 1.0f);
+                    }
+                }
             }
         }
     }
@@ -1513,6 +1520,21 @@ partial class Program
             x1, y0, residual.Color, 0f,
             x1, y1, residual.Color, 0f,
             xi1, yi1, residual.Color, alpha);
+    }
+
+    private static int SurfaceRenderSubdivisions(int span)
+    {
+        if (span >= 36)
+        {
+            return 4;
+        }
+
+        if (span >= 24)
+        {
+            return 3;
+        }
+
+        return span >= 14 ? 2 : 1;
     }
 
     private static void AppendStrokeVertices(List<float> vertices, int width, int height, StrokePrimitive stroke, bool glowPass)
