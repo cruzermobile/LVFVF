@@ -599,8 +599,12 @@ partial class Program
             return 255;
         }
 
-        double keepPercent = 0.014 + strokeDensity * 0.00072 + quality * 0.00017;
-        int keep = Math.Clamp((int)Math.Round(nonZero * keepPercent), Math.Max(80, nonZero / 300), Math.Max(1, nonZero / 6));
+        double keepPercent = 0.012 + strokeDensity * 0.00075 + quality * 0.00022;
+        int targetKeep = (int)Math.Round(nonZero * keepPercent);
+        int minKeep = Math.Max(1, nonZero / 300);
+        int maxKeep = Math.Max(minKeep, Math.Max(1, nonZero / 6));
+        minKeep = Math.Max(minKeep, Math.Min(80, maxKeep));
+        int keep = Math.Clamp(targetKeep, minKeep, maxKeep);
         int accumulated = 0;
         for (int value = 255; value >= 1; value--)
         {
